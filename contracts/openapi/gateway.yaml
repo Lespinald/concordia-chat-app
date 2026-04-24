@@ -1,0 +1,1523 @@
+openapi: 3.1.0
+
+info:
+  title: Concordia Gateway API
+  version: 0.1.0
+  description: |
+    Single entry-point for all Concordia client traffic. Validates JWTs,
+    enforces rate limits (60 req/min per user), calls Servers Svc via gRPC
+    for permission checks on channel routes, and proxies to the appropriate
+    upstream service.
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+
+tags:
+  - name: auth
+    description: Registration, login, logout, and token refresh
+  - name: users
+    description: User profiles and friend relationships
+  - name: servers
+    description: Server management — channels, members, and roles
+  - name: channels
+    description: Channel metadata, messages, and file attachments
+  - name: voice
+    description: Voice session management and WebRTC signaling
+  - name: tips
+    description: Email subscription preferences
+  - name: presence
+    description: User presence status
+  - name: health
+    description: Gateway liveness check
+
+# Default: no auth required. Protected routes override with BearerAuth.
+security: []
+
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access JWT issued by Auth Svc. Expires after 15 minutes.
+
+  parameters:
+    userId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+    serverId:
+      name: serverId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: b2c3d4e5-f6a7-8901-bcde-f12345678901
+
+    channelId:
+      name: channelId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: c3d4e5f6-a7b8-9012-cdef-123456789012
+
+    messageId:
+      name: messageId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: d4e5f6a7-b8c9-0123-defa-234567890123
+
+    roleId:
+      name: roleId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: e5f6a7b8-c9d0-1234-efab-345678901234
+
+    sessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: f6a7b8c9-d0e1-2345-fabc-456789012345
+
+    friendId:
+      name: friendId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      example: f6a7b8c9-d0e1-2345-fabc-456789012345
+
+  schemas:
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      example:
+        code: UNAUTHORIZED
+        message: Token is expired or invalid.
+
+    User:
+      type: object
+      required: [user_id, username, email, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+          maxLength: 32
+        email:
+          type: string
+          format: email
+        created_at:
+          type: string
+          format: date-time
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        username: alice
+        email: alice@example.com
+        created_at: "2026-01-15T09:00:00Z"
+
+    UserProfile:
+      type: object
+      required: [user_id, username]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        username: alice
+
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token]
+      properties:
+        access_token:
+          type: string
+          description: JWT access token. 15-minute TTL.
+        refresh_token:
+          type: string
+          description: Opaque refresh token. 30-day TTL.
+      example:
+        access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMWIyYzNkNCJ9.sig
+        refresh_token: dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4
+
+    Friend:
+      type: object
+      required: [user_id, friend_id, status]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        friend_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, accepted, rejected]
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        friend_id: f6a7b8c9-d0e1-2345-fabc-456789012345
+        status: accepted
+
+    Server:
+      type: object
+      required: [server_id, name, owner_id, created_at]
+      properties:
+        server_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 100
+        owner_id:
+          type: string
+          format: uuid
+        icon_url:
+          type: [string, "null"]
+          format: uri
+        created_at:
+          type: string
+          format: date-time
+      example:
+        server_id: b2c3d4e5-f6a7-8901-bcde-f12345678901
+        name: Gaming Hub
+        owner_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        icon_url: null
+        created_at: "2026-01-20T12:00:00Z"
+
+    Channel:
+      type: object
+      required: [channel_id, name, type]
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        server_id:
+          type: [string, "null"]
+          format: uuid
+          description: Null for DM channels.
+        name:
+          type: string
+        type:
+          type: string
+          enum: [text, voice, dm]
+      example:
+        channel_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+        server_id: b2c3d4e5-f6a7-8901-bcde-f12345678901
+        name: general
+        type: text
+
+    Message:
+      type: object
+      required: [message_id, channel_id, author_id, content, attachments, created_at]
+      properties:
+        message_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        author_id:
+          type: string
+          format: uuid
+        content:
+          type: string
+          maxLength: 4000
+        attachments:
+          type: array
+          items:
+            type: string
+          description: MinIO object keys.
+        deleted:
+          type: boolean
+          default: false
+        created_at:
+          type: string
+          format: date-time
+      example:
+        message_id: d4e5f6a7-b8c9-0123-defa-234567890123
+        channel_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+        author_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        content: Hello, everyone!
+        attachments: []
+        deleted: false
+        created_at: "2026-04-01T14:30:00Z"
+
+    Member:
+      type: object
+      required: [user_id, server_id, joined_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        server_id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        roles:
+          type: array
+          items:
+            type: string
+            format: uuid
+        joined_at:
+          type: string
+          format: date-time
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        server_id: b2c3d4e5-f6a7-8901-bcde-f12345678901
+        username: alice
+        roles: []
+        joined_at: "2026-01-20T12:05:00Z"
+
+    Role:
+      type: object
+      required: [role_id, server_id, name, permissions]
+      properties:
+        role_id:
+          type: string
+          format: uuid
+        server_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        permissions:
+          type: integer
+          format: int64
+          description: Permission bitmask.
+        color:
+          type: [integer, "null"]
+      example:
+        role_id: e5f6a7b8-c9d0-1234-efab-345678901234
+        server_id: b2c3d4e5-f6a7-8901-bcde-f12345678901
+        name: Moderator
+        permissions: 2048
+        color: 3447003
+
+    VoiceSession:
+      type: object
+      required: [session_id, user_id, channel_id, stun_servers]
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        channel_id:
+          type: string
+          format: uuid
+        stun_servers:
+          type: array
+          items:
+            type: object
+            required: [urls]
+            properties:
+              urls:
+                type: string
+      example:
+        session_id: f6a7b8c9-d0e1-2345-fabc-456789012345
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        channel_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+        stun_servers:
+          - urls: "stun:stun.l.google.com:19302"
+
+    PresignedUrl:
+      type: object
+      required: [upload_url, object_key, expires_at]
+      properties:
+        upload_url:
+          type: string
+          format: uri
+          description: Presigned MinIO PUT URL. 5-minute TTL.
+        object_key:
+          type: string
+          description: Reference this key in the message body after upload.
+        expires_at:
+          type: string
+          format: date-time
+      example:
+        upload_url: "http://minio:9000/attachments/msg/abcdef?X-Amz-Signature=abc123"
+        object_key: msg/a1b2c3d4/screenshot.png
+        expires_at: "2026-04-01T14:35:00Z"
+
+    SubscriptionPreferences:
+      type: object
+      required: [user_id, weekly_digest, product_updates, created_at]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        weekly_digest:
+          type: boolean
+        product_updates:
+          type: boolean
+        opted_out_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        weekly_digest: true
+        product_updates: true
+        opted_out_at: null
+        created_at: "2026-01-15T09:00:00Z"
+
+    Presence:
+      type: object
+      required: [user_id, status]
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [online, idle, dnd, invisible, offline]
+        last_seen:
+          type: [string, "null"]
+          format: date-time
+      example:
+        user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        status: online
+        last_seen: "2026-04-01T14:30:00Z"
+
+  responses:
+
+    Unauthorized:
+      description: Missing or invalid access token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: UNAUTHORIZED
+            message: Token is expired or invalid.
+
+    Forbidden:
+      description: Valid token but insufficient permissions for this resource.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: FORBIDDEN
+            message: You do not have permission to perform this action.
+
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: NOT_FOUND
+            message: The requested resource does not exist.
+
+    NoContent:
+      description: Success with no response body.
+
+paths:
+
+  # ── Health ──────────────────────────────────────────────────────────────────
+
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Gateway liveness check
+      responses:
+        '200':
+          description: Gateway is healthy.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+              example:
+                status: ok
+
+  # ── Auth ────────────────────────────────────────────────────────────────────
+
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, email, password]
+              properties:
+                username:
+                  type: string
+                  minLength: 2
+                  maxLength: 32
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+            example:
+              username: alice
+              email: alice@example.com
+              password: s3cr3tP@ss
+      responses:
+        '201':
+          description: User created. Email confirmation is required before the first login.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '409':
+          description: Email or username already in use.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                code: CONFLICT
+                message: Email is already registered.
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Authenticate and receive a JWT + refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+            example:
+              email: alice@example.com
+              password: s3cr3tP@ss
+      responses:
+        '200':
+          description: Authenticated successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenPair'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Invalidate the current refresh token
+      security:
+        - BearerAuth: []
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      operationId: refreshToken
+      tags: [auth]
+      summary: Exchange a refresh token for a new access JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+            example:
+              refresh_token: dGhpcyBpcyBhIHJlZnJlc2ggdG9rZW4
+      responses:
+        '200':
+          description: New access token issued.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [access_token]
+                properties:
+                  access_token:
+                    type: string
+              example:
+                access_token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhMWIyYzNkNCJ9.sig
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Users ───────────────────────────────────────────────────────────────────
+
+  /users/{userId}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get public profile of a user
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: Public user profile.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfile'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /users/{userId}/friends:
+    get:
+      operationId: listFriends
+      tags: [users]
+      summary: List accepted friend relationships for a user
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: Friend list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Friend'
+              example:
+                - user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  friend_id: f6a7b8c9-d0e1-2345-fabc-456789012345
+                  status: accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: sendFriendRequest
+      tags: [users]
+      summary: Send a friend request
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [friend_id]
+              properties:
+                friend_id:
+                  type: string
+                  format: uuid
+            example:
+              friend_id: f6a7b8c9-d0e1-2345-fabc-456789012345
+      responses:
+        '201':
+          description: Friend request sent.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Friend'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/{userId}/friends/{friendId}:
+    put:
+      operationId: updateFriendRequest
+      tags: [users]
+      summary: Accept or reject a pending friend request
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+        - $ref: '#/components/parameters/friendId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [accepted, rejected]
+            example:
+              status: accepted
+      responses:
+        '200':
+          description: Friend request updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Friend'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Servers ─────────────────────────────────────────────────────────────────
+
+  /servers:
+    post:
+      operationId: createServer
+      tags: [servers]
+      summary: Create a new server
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+            example:
+              name: Gaming Hub
+      responses:
+        '201':
+          description: Server created with a default #general text channel.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Server'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /servers/{serverId}:
+    get:
+      operationId: getServer
+      tags: [servers]
+      summary: Get server details and channel list
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      responses:
+        '200':
+          description: Server details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Server'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      operationId: updateServer
+      tags: [servers]
+      summary: Update server name or icon (owner only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                icon_url:
+                  type: [string, "null"]
+                  format: uri
+            example:
+              name: Ultimate Gaming Hub
+      responses:
+        '200':
+          description: Updated server.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Server'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: deleteServer
+      tags: [servers]
+      summary: Delete a server (owner only)
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /servers/{serverId}/channels:
+    post:
+      operationId: createChannel
+      tags: [servers]
+      summary: Create a text or voice channel in a server
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                type:
+                  type: string
+                  enum: [text, voice]
+            example:
+              name: announcements
+              type: text
+      responses:
+        '201':
+          description: Channel created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /servers/{serverId}/channels/{channelId}:
+    delete:
+      operationId: deleteChannel
+      tags: [servers]
+      summary: Delete a channel from a server
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+        - $ref: '#/components/parameters/channelId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /servers/{serverId}/channels/{channelId}/permissions:
+    put:
+      operationId: setChannelPermissions
+      tags: [servers]
+      summary: Set per-role or per-member permission overwrites for a channel
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+        - $ref: '#/components/parameters/channelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_id, target_type, allow_bits, deny_bits]
+              properties:
+                target_id:
+                  type: string
+                  format: uuid
+                target_type:
+                  type: string
+                  enum: [role, member]
+                allow_bits:
+                  type: integer
+                  format: int64
+                deny_bits:
+                  type: integer
+                  format: int64
+            example:
+              target_id: e5f6a7b8-c9d0-1234-efab-345678901234
+              target_type: role
+              allow_bits: 1024
+              deny_bits: 0
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /servers/{serverId}/members:
+    get:
+      operationId: listMembers
+      tags: [servers]
+      summary: Paginated member list with roles
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: after
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Cursor — return members after this user ID.
+      responses:
+        '200':
+          description: Member list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Member'
+              example:
+                - user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  server_id: b2c3d4e5-f6a7-8901-bcde-f12345678901
+                  username: alice
+                  roles: []
+                  joined_at: "2026-01-20T12:05:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: joinServer
+      tags: [servers]
+      summary: Join a server via invite code
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invite_code]
+              properties:
+                invite_code:
+                  type: string
+            example:
+              invite_code: XyZ123
+      responses:
+        '201':
+          description: Joined server successfully.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Invalid invite code or server not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /servers/{serverId}/members/{userId}:
+    delete:
+      operationId: kickMember
+      tags: [servers]
+      summary: Kick a member from the server (requires KICK_MEMBERS permission)
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /servers/{serverId}/roles:
+    get:
+      operationId: listRoles
+      tags: [servers]
+      summary: List all roles in a server
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      responses:
+        '200':
+          description: Role list.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Role'
+              example:
+                - role_id: e5f6a7b8-c9d0-1234-efab-345678901234
+                  server_id: b2c3d4e5-f6a7-8901-bcde-f12345678901
+                  name: Moderator
+                  permissions: 2048
+                  color: 3447003
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      operationId: createRole
+      tags: [servers]
+      summary: Create a role in a server
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: integer
+                  format: int64
+                  default: 0
+                color:
+                  type: [integer, "null"]
+            example:
+              name: Moderator
+              permissions: 2048
+              color: 3447003
+      responses:
+        '201':
+          description: Role created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /servers/{serverId}/roles/{roleId}:
+    put:
+      operationId: updateRole
+      tags: [servers]
+      summary: Update a role's name and permission bitmask
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+        - $ref: '#/components/parameters/roleId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                permissions:
+                  type: integer
+                  format: int64
+            example:
+              name: Senior Moderator
+              permissions: 4096
+      responses:
+        '200':
+          description: Updated role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ── Channels ─────────────────────────────────────────────────────────────────
+
+  /channels/{channelId}:
+    get:
+      operationId: getChannel
+      tags: [channels]
+      summary: Get channel metadata
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+      responses:
+        '200':
+          description: Channel details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /channels/{channelId}/messages:
+    get:
+      operationId: listMessages
+      tags: [channels]
+      summary: Cursor-paginated message history (newest first)
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: Return messages older than this message ID.
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: Message page.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+              example:
+                - message_id: d4e5f6a7-b8c9-0123-defa-234567890123
+                  channel_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+                  author_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  content: Hello, everyone!
+                  attachments: []
+                  deleted: false
+                  created_at: "2026-04-01T14:30:00Z"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      operationId: createMessage
+      tags: [channels]
+      summary: Post a message to a channel
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:
+                  type: string
+                  minLength: 1
+                  maxLength: 4000
+                attachments:
+                  type: array
+                  items:
+                    type: string
+                  description: MinIO object keys from a prior presign upload.
+            example:
+              content: "Hey @alice, check this out!"
+              attachments: []
+      responses:
+        '201':
+          description: Message persisted and Kafka event published.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /channels/{channelId}/messages/{messageId}:
+    delete:
+      operationId: deleteMessage
+      tags: [channels]
+      summary: Soft-delete a message (author or MANAGE_MESSAGES permission)
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+        - $ref: '#/components/parameters/messageId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /channels/{channelId}/attachments/presign:
+    post:
+      operationId: presignAttachment
+      tags: [channels]
+      summary: Get a presigned MinIO PUT URL for a file upload
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [filename, content_type]
+              properties:
+                filename:
+                  type: string
+                content_type:
+                  type: string
+            example:
+              filename: screenshot.png
+              content_type: image/png
+      responses:
+        '200':
+          description: |
+            Presigned upload URL. PUT the file bytes to `upload_url`, then include
+            `object_key` in the message body when calling POST /channels/{channelId}/messages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresignedUrl'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ── Voice ────────────────────────────────────────────────────────────────────
+
+  /voice/sessions:
+    post:
+      operationId: joinVoice
+      tags: [voice]
+      summary: Join a voice channel and receive WebRTC STUN config
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_id]
+              properties:
+                channel_id:
+                  type: string
+                  format: uuid
+            example:
+              channel_id: c3d4e5f6-a7b8-9012-cdef-123456789012
+      responses:
+        '201':
+          description: Session created. Use stun_servers to initiate the WebRTC peer connection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VoiceSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /voice/sessions/{sessionId}:
+    delete:
+      operationId: leaveVoice
+      tags: [voice]
+      summary: Leave a voice channel
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/sessionId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /voice/channels/{channelId}/members:
+    get:
+      operationId: listVoiceMembers
+      tags: [voice]
+      summary: List users currently connected to a voice channel
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/channelId'
+      responses:
+        '200':
+          description: Active voice participants.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserProfile'
+              example:
+                - user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  username: alice
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ── Tips ─────────────────────────────────────────────────────────────────────
+
+  /tips:
+    post:
+      operationId: subscribe
+      tags: [tips]
+      summary: Opt a user in to email subscriptions
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id]
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+                weekly_digest:
+                  type: boolean
+                  default: true
+                product_updates:
+                  type: boolean
+                  default: true
+            example:
+              user_id: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+              weekly_digest: true
+              product_updates: true
+      responses:
+        '201':
+          description: Subscribed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tips/{userId}:
+    get:
+      operationId: getSubscription
+      tags: [tips]
+      summary: Get subscription preferences for a user
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: Subscription preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      operationId: updateSubscription
+      tags: [tips]
+      summary: Update individual subscription preferences
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                weekly_digest:
+                  type: boolean
+                product_updates:
+                  type: boolean
+            example:
+              weekly_digest: false
+              product_updates: true
+      responses:
+        '200':
+          description: Updated preferences.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubscriptionPreferences'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      operationId: unsubscribe
+      tags: [tips]
+      summary: Opt out of all email subscriptions
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ── Presence ─────────────────────────────────────────────────────────────────
+
+  /presence/{userId}:
+    get:
+      operationId: getPresence
+      tags: [presence]
+      summary: Get presence status for a user
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      responses:
+        '200':
+          description: User presence.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Presence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    put:
+      operationId: setPresence
+      tags: [presence]
+      summary: Set presence status
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/userId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [online, idle, dnd, invisible]
+            example:
+              status: idle
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContent'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
