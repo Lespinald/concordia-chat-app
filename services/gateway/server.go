@@ -20,6 +20,7 @@ type config struct {
 	VoiceURL    string
 	TipsURL     string
 	PresenceURL string
+	RedisAddr   string
 }
 
 func configFromEnv() config {
@@ -30,6 +31,7 @@ func configFromEnv() config {
 		VoiceURL:    getenv("VOICE_URL", "http://voice:8084"),
 		TipsURL:     getenv("TIPS_URL", "http://tips:8085"),
 		PresenceURL: getenv("PRESENCE_URL", "http://presence:8086"),
+		RedisAddr:   getenv("REDIS_ADDR", "redis:6379"),
 	}
 }
 
@@ -89,6 +91,8 @@ func buildMux(cfg config) http.Handler {
 		}
 	})
 
+	rl := middleware.NewRateLimiter(cfg.RedisAddr)
+
 	mux := http.NewServeMux()
 
 	// Public routes — no JWT required.
@@ -104,9 +108,9 @@ func buildMux(cfg config) http.Handler {
 	wsH := ws.New(cfg.PresenceURL, cfg.ChatURL)
 	mux.Handle("GET /ws", middleware.RequireAuth(wsH))
 
-	// All other routes require a valid Bearer JWT.
+	// All other routes require a valid Bearer JWT and are rate-limited.
 	// The catch-all "/" has lower priority than every explicit pattern above.
-	mux.Handle("/", middleware.RequireAuth(router))
+	mux.Handle("/", middleware.RequireAuth(rl.Limit(router)))
 
 	// Pprof endpoints (dev only — exposes runtime internals).
 	// The blank import of net/http/pprof in main.go registers handlers on
