@@ -229,6 +229,74 @@ func TestUpstream5xxPassthrough(t *testing.T) {
 	<-ch
 }
 
+// ── CORS integration tests ───────────────────────────────────────────────────
+
+func corsGW(t *testing.T, origins []string) *httptest.Server {
+	t.Helper()
+	_ = validToken(t) // set JWT_SECRET
+	cfg := config{
+		AuthURL: graveyard(t), ServersURL: graveyard(t), ChatURL: graveyard(t),
+		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
+		AllowedOrigins: origins,
+	}
+	gw := httptest.NewServer(buildMux(cfg))
+	t.Cleanup(gw.Close)
+	return gw
+}
+
+func TestCORSPreflightReturns200(t *testing.T) {
+	gw := corsGW(t, []string{"http://localhost:3000"})
+
+	r, _ := http.NewRequest(http.MethodOptions, gw.URL+"/servers", nil)
+	r.Header.Set("Origin", "http://localhost:3000")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatalf("OPTIONS request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("preflight status = %d, want 200", resp.StatusCode)
+	}
+	for _, hdr := range []struct{ key, want string }{
+		{"Access-Control-Allow-Origin", "http://localhost:3000"},
+		{"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
+		{"Access-Control-Allow-Headers", "Content-Type, Authorization"},
+	} {
+		if got := resp.Header.Get(hdr.key); got != hdr.want {
+			t.Errorf("%s = %q, want %q", hdr.key, got, hdr.want)
+		}
+	}
+}
+
+func TestCORSHeadersOnRegularRequest(t *testing.T) {
+	gw := corsGW(t, []string{"http://localhost:3000"})
+	tok := validToken(t)
+
+	r, _ := http.NewRequest(http.MethodGet, gw.URL+"/health", nil)
+	r.Header.Set("Origin", "http://localhost:3000")
+	r.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatalf("GET /health: %v", err)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "http://localhost:3000" {
+		t.Errorf("ACAO = %q, want http://localhost:3000", got)
+	}
+}
+
+func TestCORSDisallowedOriginNoHeaders(t *testing.T) {
+	gw := corsGW(t, []string{"http://localhost:3000"})
+
+	r, _ := http.NewRequest(http.MethodOptions, gw.URL+"/health", nil)
+	r.Header.Set("Origin", "http://evil.example.com")
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatalf("OPTIONS: %v", err)
+	}
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("ACAO set for disallowed origin: %q", got)
+	}
+}
+
 // ── isChatPath unit tests ────────────────────────────────────────────────────
 
 func TestIsChatPath(t *testing.T) {
