@@ -15,9 +15,6 @@ spring:
     show-sql: false
   flyway:
     enabled: true
-    url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/auth_db}
-    user: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
 
   kafka:
     bootstrap-servers: ${KAFKA_URL:localhost:9092}
