@@ -1,11 +1,9 @@
-version: "3.9"
-
 # ---------------------------------------------------------------
 # Concordia – full local stack
 # T-06: Kafka + Zookeeper
-# T-07: PostgreSQL, Cassandra, Redis, MinIO  ← this commit
+# T-07: PostgreSQL, Cassandra, Redis, MinIO
 # T-08: Application services
-# T-09: Web App
+# T-09: Web App                           ← this commit
 # ---------------------------------------------------------------
 
 services:
@@ -64,14 +62,12 @@ services:
       kafka:
         condition: service_healthy
     entrypoint: ["/bin/bash", "-c"]
-    command: |
-      kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists \
-        --topic user-registered --partitions 1 --replication-factor 1 &&
-      kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists \
-        --topic message-created --partitions 1 --replication-factor 1 &&
-      kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists \
-        --topic mention --partitions 1 --replication-factor 1 &&
-      echo 'Topics created: user-registered, message-created, mention'
+    command:
+      - >-
+        kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists --topic user-registered --partitions 1 --replication-factor 1 &&
+        kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists --topic message-created --partitions 1 --replication-factor 1 &&
+        kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists --topic mention --partitions 1 --replication-factor 1 &&
+        echo 'Topics created: user-registered, message-created, mention'
 
   # ── Databases ─────────────────────────────────────────────────
 
@@ -80,8 +76,8 @@ services:
     container_name: postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: discord
-      POSTGRES_PASSWORD: discord
+      POSTGRES_USER: "${POSTGRES_USER:-discord}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-discord}"
       # discord_auth is the primary DB; auth_db / servers_db / tips_db are
       # created by the init script below.
       POSTGRES_DB: discord_auth
@@ -91,7 +87,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U discord -d discord_auth"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-discord} -d discord_auth"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -146,8 +142,8 @@ services:
       - "9000:9000"   # S3-compatible API
       - "9001:9001"   # Web console
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
@@ -166,14 +162,203 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
     entrypoint: ["/bin/sh", "-c"]
-    command: |
-      mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb --ignore-existing local/attachments &&
-      echo 'Bucket attachments created.'
+    command:
+      - "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/attachments && echo 'Bucket attachments created.'"
+
+  # ── Application services ──────────────────────────────────────
+
+  gateway:
+    build:
+      context: ../services/gateway
+    container_name: gateway
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      GATEWAY_PORT: "${GATEWAY_PORT:-8080}"
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  auth:
+    build:
+      context: ..
+      dockerfile: services/auth/Dockerfile
+    container_name: auth
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SERVER_PORT: "8081"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/auth_db"
+      SPRING_DATASOURCE_USERNAME: "${POSTGRES_USER:-discord}"
+      SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-discord}"
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  servers:
+    build:
+      context: ..
+      dockerfile: services/servers/Dockerfile
+    container_name: servers
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8082:8082"
+    environment:
+      SERVER_PORT: "8082"
+      SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/servers_db"
+      SPRING_DATASOURCE_USERNAME: "${POSTGRES_USER:-discord}"
+      SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-discord}"
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8082/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  chat:
+    build:
+      context: ../services/chat
+    container_name: chat
+    restart: unless-stopped
+    depends_on:
+      cassandra:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8083:8083"
+    environment:
+      CHAT_PORT: "${CHAT_PORT:-8083}"
+      CASSANDRA_HOST: cassandra
+      KAFKA_BROKERS: kafka:9093
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  voice:
+    build:
+      context: ../services/voice
+    container_name: voice
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8084:8084"
+    environment:
+      VOICE_PORT: "${VOICE_PORT:-8084}"
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8084/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  tips:
+    build:
+      context: ../services/tips
+    container_name: tips
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8085:8085"
+    environment:
+      TIPS_PORT: "${TIPS_PORT:-8085}"
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-discord}:${POSTGRES_PASSWORD:-discord}@postgres:5432/tips_db"
+      KAFKA_BROKERS: kafka:9093
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8085/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  presence:
+    build:
+      context: ../services/presence
+    container_name: presence
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8086:8086"
+    environment:
+      PRESENCE_PORT: "${PRESENCE_PORT:-8086}"
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8086/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Web App ───────────────────────────────────────────────────
+
+  web-app:
+    build:
+      context: ../apps/web-app
+    container_name: web-app
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    volumes:
+      # Bind-mount source for hot-reload; named volume keeps container node_modules intact.
+      - ../apps/web-app:/app
+      - web_app_node_modules:/app/node_modules
+    environment:
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://gateway:8080}"
+      # Polling watcher needed for hot-reload on Docker Desktop (Mac/Windows).
+      WATCHPACK_POLLING: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   postgres_data:
   cassandra_data:
   redis_data:
   minio_data:
+  web_app_node_modules:
