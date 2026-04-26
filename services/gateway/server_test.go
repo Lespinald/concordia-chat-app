@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -295,6 +296,116 @@ func TestCORSDisallowedOriginNoHeaders(t *testing.T) {
 	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "" {
 		t.Errorf("ACAO set for disallowed origin: %q", got)
 	}
+}
+
+// ── getenv / parseOrigins / configFromEnv ───────────────────────────────────
+
+func TestGetenv(t *testing.T) {
+	t.Setenv("_TEST_GW_KEY", "")
+	if got := getenv("_TEST_GW_KEY", "fallback"); got != "fallback" {
+		t.Fatalf("unset key: got %q, want fallback", got)
+	}
+	t.Setenv("_TEST_GW_KEY", "explicit")
+	if got := getenv("_TEST_GW_KEY", "fallback"); got != "explicit" {
+		t.Fatalf("set key: got %q, want explicit", got)
+	}
+}
+
+func TestParseOrigins(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want []string
+	}{
+		{"", []string{"http://localhost:3000"}},
+		{"http://a.test", []string{"http://a.test"}},
+		{"http://a.test,http://b.test", []string{"http://a.test", "http://b.test"}},
+		{" http://a.test , http://b.test ", []string{"http://a.test", "http://b.test"}},
+	}
+	for _, tc := range cases {
+		got := parseOrigins(tc.raw)
+		if len(got) != len(tc.want) {
+			t.Errorf("parseOrigins(%q) = %v, want %v", tc.raw, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("parseOrigins(%q)[%d] = %q, want %q", tc.raw, i, got[i], tc.want[i])
+			}
+		}
+	}
+}
+
+func TestConfigFromEnv(t *testing.T) {
+	t.Setenv("AUTH_URL", "http://auth-test:8181")
+	t.Setenv("REDIS_ADDR", "redis-test:9999")
+	t.Setenv("ALLOWED_ORIGINS", "http://frontend.test")
+
+	cfg := configFromEnv()
+
+	if cfg.AuthURL != "http://auth-test:8181" {
+		t.Errorf("AuthURL = %q, want http://auth-test:8181", cfg.AuthURL)
+	}
+	if cfg.RedisAddr != "redis-test:9999" {
+		t.Errorf("RedisAddr = %q, want redis-test:9999", cfg.RedisAddr)
+	}
+	if len(cfg.AllowedOrigins) != 1 || cfg.AllowedOrigins[0] != "http://frontend.test" {
+		t.Errorf("AllowedOrigins = %v, want [http://frontend.test]", cfg.AllowedOrigins)
+	}
+}
+
+// ── Integration: full request cycle ─────────────────────────────────────────
+
+// TestIntegrationFullCycle exercises the complete middleware stack end-to-end:
+// HTTP client → Logger → CORS → RequireAuth (JWT) → RateLimit (Redis) → proxy → mock upstream.
+func TestIntegrationFullCycle(t *testing.T) {
+	mr := miniredis.RunT(t)
+	tok := validToken(t) // sets JWT_SECRET, user ID = "u1"
+
+	up, ch := upstreamOf(t, http.StatusOK)
+	gw := httptest.NewServer(buildMux(config{
+		AuthURL:     graveyard(t),
+		ServersURL:  up.URL,
+		ChatURL:     graveyard(t),
+		VoiceURL:    graveyard(t),
+		TipsURL:     graveyard(t),
+		PresenceURL: graveyard(t),
+		RedisAddr:   mr.Addr(),
+	}))
+	t.Cleanup(gw.Close)
+
+	resp := req(t, gw, "GET", "/servers/srv-1", tok)
+	assertStatus(t, resp, http.StatusOK)
+
+	if got := <-ch; got != "/servers/srv-1" {
+		t.Fatalf("upstream received path %q, want /servers/srv-1", got)
+	}
+}
+
+// TestIntegrationRateLimitEndToEnd verifies that the rate limiter inside the
+// full gateway stack returns 429 once the per-user counter is exhausted.
+func TestIntegrationRateLimitEndToEnd(t *testing.T) {
+	mr := miniredis.RunT(t)
+	tok := validToken(t) // user ID "u1"
+
+	// Pre-fill the Redis counter so the next request tips over the 100-req limit.
+	if err := mr.Set("ratelimit:u1", "100"); err != nil {
+		t.Fatalf("miniredis Set: %v", err)
+	}
+
+	up, _ := upstreamOf(t, http.StatusOK)
+	gw := httptest.NewServer(buildMux(config{
+		AuthURL:     graveyard(t),
+		ServersURL:  up.URL,
+		ChatURL:     graveyard(t),
+		VoiceURL:    graveyard(t),
+		TipsURL:     graveyard(t),
+		PresenceURL: graveyard(t),
+		RedisAddr:   mr.Addr(),
+	}))
+	t.Cleanup(gw.Close)
+
+	resp := req(t, gw, "GET", "/servers", tok)
+	assertStatus(t, resp, http.StatusTooManyRequests)
 }
 
 // ── isChatPath unit tests ────────────────────────────────────────────────────

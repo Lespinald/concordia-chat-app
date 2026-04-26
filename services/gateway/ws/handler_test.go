@@ -316,6 +316,81 @@ func TestUnknownMessageType(t *testing.T) {
 	}
 }
 
+// ── Branch-coverage tests ────────────────────────────────────────────────────
+
+// TestServeHTTPNoClaims calls the handler directly without RequireAuth to
+// exercise the guard clause that rejects requests with no JWT claims in context.
+func TestServeHTTPNoClaims(t *testing.T) {
+	_ = makeToken(t) // ensure JWT_SECRET is set
+	h := ws.New("http://unused", "http://unused")
+
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
+	h.ServeHTTP(rec, r) // no claims injected
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rec.Code)
+	}
+}
+
+// TestDispatchMissingChannelID sends a message.send frame that omits channel_id
+// and expects an error reply containing "channel_id".
+func TestDispatchMissingChannelID(t *testing.T) {
+	p, _ := mockPresence(t)
+	tok := makeToken(t)
+
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	conn, _ := dial(t, wsBase, "/", tok)
+	if conn == nil {
+		t.Fatal("expected WebSocket connection")
+	}
+	defer conn.Close()
+	readMsg(t, conn) // discard welcome
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":    "message.send",
+		"payload": map[string]string{"content": "hello"},
+		// channel_id intentionally omitted
+	})
+	conn.WriteMessage(websocket.TextMessage, raw) //nolint:errcheck
+
+	resp := readMsg(t, conn)
+	if resp["type"] != "error" {
+		t.Fatalf("expected error frame, got type %q", resp["type"])
+	}
+	if errMsg, _ := resp["error"].(string); !strings.Contains(errMsg, "channel_id") {
+		t.Fatalf("error %q should mention channel_id", errMsg)
+	}
+}
+
+// TestForwardToChatUpstreamDown verifies that when the chat service is
+// unreachable, the handler sends an "upstream unavailable" error frame rather
+// than crashing or silently dropping the message.
+func TestForwardToChatUpstreamDown(t *testing.T) {
+	p, _ := mockPresence(t)
+	tok := makeToken(t)
+
+	// Port 19998 has nothing listening — connection will be refused immediately.
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://127.0.0.1:19998"))
+	conn, _ := dial(t, wsBase, "/", tok)
+	if conn == nil {
+		t.Fatal("expected WebSocket connection")
+	}
+	defer conn.Close()
+	readMsg(t, conn) // discard welcome
+
+	raw, _ := json.Marshal(map[string]any{
+		"type":       "message.send",
+		"channel_id": "ch-1",
+		"payload":    map[string]string{"content": "hi"},
+	})
+	conn.WriteMessage(websocket.TextMessage, raw) //nolint:errcheck
+
+	resp := readMsg(t, conn)
+	if resp["type"] != "error" {
+		t.Fatalf("expected error frame when chat is down, got %v", resp)
+	}
+}
+
 // ── Load test: 50 simultaneous connections ───────────────────────────────────
 
 func TestLoad50SimultaneousConnections(t *testing.T) {
