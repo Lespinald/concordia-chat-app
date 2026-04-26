@@ -185,7 +185,7 @@ WS     /ws                     → internal fan-out handler
 ```
 JWT_SECRET=...
 KAFKA_BROKERS=kafka:9092
-REDIS_URL=redis:6379
+REDIS_ADDR=redis:6379
 AUTH_ADDR=auth:8081
 SERVERS_ADDR=servers:8082
 CHAT_ADDR=chat:8083
@@ -378,7 +378,7 @@ Voice Svc relays: A's SDP offer → B
 
 **Key environment variables:**
 ```
-REDIS_URL=redis://redis:6379
+REDIS_ADDR=redis://redis:6379
 STUN_SERVER=stun:stun.l.google.com:19302
 ```
 
@@ -412,7 +412,7 @@ presence:{userId}   HASH  status, gatewayInstanceId, lastSeen
 
 **Key environment variables:**
 ```
-REDIS_URL=redis:6379
+REDIS_ADDR=redis:6379
 INSTANCE_ID=gateway-1   # injected by docker-compose
 ```
 
