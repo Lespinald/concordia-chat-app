@@ -28,6 +28,9 @@ func RequireAuth(next http.Handler) http.Handler {
 			writeUnauthorized(w)
 			return
 		}
+		if f, ok := r.Context().Value(logFieldsKey{}).(*logFields); ok {
+			f.UserID = claims.UserID
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ClaimsKey, claims)))
 	})
 }
