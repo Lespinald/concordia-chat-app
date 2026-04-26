@@ -11,7 +11,7 @@ services:
   # ── Message broker ────────────────────────────────────────────
 
   zookeeper:
-    image: bitnami/zookeeper:3.9
+    image: bitnami/zookeeper:latest
     container_name: zookeeper
     restart: unless-stopped
     environment:
@@ -26,7 +26,7 @@ services:
       start_period: 15s
 
   kafka:
-    image: bitnami/kafka:3.6
+    image: bitnami/kafka:latest
     container_name: kafka
     restart: unless-stopped
     depends_on:
@@ -55,7 +55,7 @@ services:
   # One-shot init container: creates the three application topics once Kafka is healthy.
   # Uses the INTERNAL listener (kafka:9093) so it works entirely inside the Docker network.
   kafka-init:
-    image: bitnami/kafka:3.6
+    image: bitnami/kafka:latest
     container_name: kafka-init
     restart: "no"
     depends_on:
@@ -208,6 +208,7 @@ services:
       SPRING_DATASOURCE_USERNAME: "${POSTGRES_USER:-discord}"
       SPRING_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:-discord}"
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: "kafka:9093"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
       interval: 10s
