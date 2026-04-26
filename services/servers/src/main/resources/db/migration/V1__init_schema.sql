@@ -24,8 +24,8 @@ CREATE TABLE roles (
                        name VARCHAR(255) NOT NULL
 );
 
-CREATE TABLE role_permissions (
-                                  role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
-                                  permission VARCHAR(100) NOT NULL,
-                                  PRIMARY KEY (role_id, permission)
+CREATE TABLE permissions (
+                             role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
+                             permission VARCHAR(100) NOT NULL,
+                             PRIMARY KEY (role_id, permission)
 );
