@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 
 	"concordia/gateway/middleware"
@@ -14,23 +15,41 @@ import (
 )
 
 type config struct {
-	AuthURL     string
-	ServersURL  string
-	ChatURL     string
-	VoiceURL    string
-	TipsURL     string
-	PresenceURL string
+	AuthURL        string
+	ServersURL     string
+	ChatURL        string
+	VoiceURL       string
+	TipsURL        string
+	PresenceURL    string
+	RedisAddr      string
+	AllowedOrigins []string
 }
 
 func configFromEnv() config {
 	return config{
-		AuthURL:     getenv("AUTH_URL", "http://auth:8081"),
-		ServersURL:  getenv("SERVERS_URL", "http://servers:8082"),
-		ChatURL:     getenv("CHAT_URL", "http://chat:8083"),
-		VoiceURL:    getenv("VOICE_URL", "http://voice:8084"),
-		TipsURL:     getenv("TIPS_URL", "http://tips:8085"),
-		PresenceURL: getenv("PRESENCE_URL", "http://presence:8086"),
+		AuthURL:        getenv("AUTH_URL", "http://auth:8081"),
+		ServersURL:     getenv("SERVERS_URL", "http://servers:8082"),
+		ChatURL:        getenv("CHAT_URL", "http://chat:8083"),
+		VoiceURL:       getenv("VOICE_URL", "http://voice:8084"),
+		TipsURL:        getenv("TIPS_URL", "http://tips:8085"),
+		PresenceURL:    getenv("PRESENCE_URL", "http://presence:8086"),
+		RedisAddr:      getenv("REDIS_ADDR", "redis:6379"),
+		AllowedOrigins: parseOrigins(os.Getenv("ALLOWED_ORIGINS")),
 	}
+}
+
+func parseOrigins(raw string) []string {
+	if raw == "" {
+		return []string{"http://localhost:3000"}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func mustProxy(rawURL string) *httputil.ReverseProxy {
@@ -89,6 +108,8 @@ func buildMux(cfg config) http.Handler {
 		}
 	})
 
+	rl := middleware.NewRateLimiter(cfg.RedisAddr)
+
 	mux := http.NewServeMux()
 
 	// Public routes — no JWT required.
@@ -104,16 +125,16 @@ func buildMux(cfg config) http.Handler {
 	wsH := ws.New(cfg.PresenceURL, cfg.ChatURL)
 	mux.Handle("GET /ws", middleware.RequireAuth(wsH))
 
-	// All other routes require a valid Bearer JWT.
+	// All other routes require a valid Bearer JWT and are rate-limited.
 	// The catch-all "/" has lower priority than every explicit pattern above.
-	mux.Handle("/", middleware.RequireAuth(router))
+	mux.Handle("/", middleware.RequireAuth(rl.Limit(router)))
 
 	// Pprof endpoints (dev only — exposes runtime internals).
 	// The blank import of net/http/pprof in main.go registers handlers on
 	// http.DefaultServeMux, which we proxy here.
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 
-	return mux
+	return middleware.CORS(cfg.AllowedOrigins)(mux)
 }
 
 func writeNotFound(w http.ResponseWriter) {

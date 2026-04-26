@@ -40,10 +40,11 @@ cd concordia-chat-app
 
 # 2. Configure environment
 cp infra/.env.example infra/.env
-# Edit infra/.env if needed (defaults work for local dev)
+# Edit infra/.env to override any defaults (all defaults work for local dev)
+# Required: set JWT_SECRET to a 32+ character string before first run
 
 # 3. Start the full stack
-docker-compose -f infra/docker-compose.yml up --build
+docker-compose --env-file infra/.env -f infra/docker-compose.yml up --build
 
 # 4. Open the app
 open http://localhost:3000
@@ -137,3 +138,11 @@ concordia-chat-app/
 ## Environment variables
 
 See [`infra/.env.example`](infra/.env.example) for a full annotated list of every variable used across all services.
+
+```bash
+cp infra/.env.example infra/.env
+# Edit infra/.env — at minimum set JWT_SECRET to a 32+ character secret
+docker-compose --env-file infra/.env -f infra/docker-compose.yml up --build
+```
+
+`infra/.env` is git-ignored. Never commit real credentials.
