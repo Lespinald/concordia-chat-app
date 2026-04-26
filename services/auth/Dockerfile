@@ -10,5 +10,7 @@ COPY services/auth/src services/auth/src
 RUN mvn -pl services/auth package -DskipTests -q
 
 FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
 COPY --from=build /build/services/auth/target/*.jar app.jar
+EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
