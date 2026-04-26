@@ -61,7 +61,7 @@ public class AuthService {
 
         userRepository.save(user);
 
-        UserRegisteredEvent event = new UserRegisteredEvent(user.getId(), user.getUsername(), user.getEmail());
+        UserRegisteredEvent event = new UserRegisteredEvent(user.getId(), user.getUsername(), user.getEmail(), user.getCreatedAt());
         kafkaTemplate.send("user-registered", user.getId().toString(), event);
 
         return new RegisterResponse(user.getId(), user.getUsername());
