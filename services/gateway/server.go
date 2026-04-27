@@ -134,7 +134,11 @@ func buildMux(cfg config) http.Handler {
 	// http.DefaultServeMux, which we proxy here.
 	mux.Handle("/debug/pprof/", http.DefaultServeMux)
 
-	return middleware.CORS(cfg.AllowedOrigins)(mux)
+rl := middleware.NewRateLimiter(100.0, 50)
+handler := rl.Limit(mux)
+handler = middleware.CORS(cfg.AllowedOrigins)(handler)
+
+return handler
 }
 
 func writeNotFound(w http.ResponseWriter) {
