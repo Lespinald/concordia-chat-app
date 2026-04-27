@@ -30,7 +30,7 @@ func main() {
 
 	port := getenv("PRESENCE_PORT", "8086")
 
-	// T-48: health check 
+	// T-48: health check
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok"}`)
@@ -111,6 +111,54 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprintf(w, `{"session_id":"%s","status":"deregistered"}`, sessionID)
 		log.Printf("presence: session deregistered session_id=%s", sessionID)
+	})
+
+	// T-52: Query sessions by channel
+	http.HandleFunc("/sessions/by-channel", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		channelID := r.URL.Query().Get("channel_id")
+		if channelID == "" {
+			http.Error(w, "channel_id is required", http.StatusBadRequest)
+			return
+		}
+
+		ctx := context.Background()
+
+		// Busca todas las sesiones guardadas en Redis
+		keys, err := rdb.Keys(ctx, "session:*").Result()
+		if err != nil {
+			http.Error(w, "failed to query sessions", http.StatusInternalServerError)
+			return
+		}
+
+		type Session struct {
+			SessionID string `json:"session_id"`
+			UserID    string `json:"user_id"`
+			ChannelID string `json:"channel_id"`
+		}
+
+		var sessions []Session
+
+		for _, key := range keys {
+			data, err := rdb.HGetAll(ctx, key).Result()
+			if err != nil || data["channel_id"] != channelID {
+				continue
+			}
+			sessionID := strings.TrimPrefix(key, "session:")
+			sessions = append(sessions, Session{
+				SessionID: sessionID,
+				UserID:    data["user_id"],
+				ChannelID: data["channel_id"],
+			})
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(sessions)
+		log.Printf("presence: queried sessions for channel_id=%s count=%d", channelID, len(sessions))
 	})
 
 	log.Printf("presence: starting on :%s", port)
