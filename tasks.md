@@ -86,7 +86,7 @@
 - Spec defines at minimum these route groups with request/response schemas:
   - `POST /auth/register`, `POST /auth/login`, `POST /auth/refresh`, `DELETE /auth/logout`
   - `GET/POST /servers`, `GET/PUT/DELETE /servers/{id}`
-  - `GET/POST /servers/{id}/channels`, `GET/PUT/DELETE /servers/{id}/channels/{cid}`
+  - `GET/POST /servers/{id}/channels`, `GET/PATCH/DELETE /servers/{id}/channels/{cid}`
   - `GET/POST /channels/{id}/messages`, `DELETE /channels/{id}/messages/{mid}`
   - `POST /channels/{id}/attachments`
   - `POST /voice/{channelId}/join`, `POST /voice/{channelId}/leave`
@@ -555,7 +555,7 @@
 **Definition of Done:**
 - `POST /servers/{id}/channels` with `{"name":"general","type":"TEXT"}` returns HTTP 201 with channel object
 - `GET /servers/{id}/channels` returns all channels in the server (only if user is a member)
-- `PUT /servers/{id}/channels/{cid}` updates channel name/type; requires MANAGE permission
+- `PATCH /servers/{id}/channels/{cid}` updates channel name/type (partial update); requires MANAGE permission
 - `DELETE /servers/{id}/channels/{cid}` soft-deletes channel; requires MANAGE permission; returns HTTP 204
 - Channel types supported: `TEXT`, `VOICE`
 - Non-member accessing a server's channels returns HTTP 403

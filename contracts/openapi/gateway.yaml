@@ -857,6 +857,49 @@ paths:
           $ref: '#/components/responses/Forbidden'
 
   /servers/{serverId}/channels/{channelId}:
+    patch:
+      operationId: updateChannel
+      tags: [servers]
+      summary: Partially update a channel's name or type
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/serverId'
+        - $ref: '#/components/parameters/channelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                type:
+                  type: string
+                  enum: [text, voice]
+            example:
+              name: announcements
+      responses:
+        '200':
+          description: Channel updated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Channel'
+        '400':
+          description: Invalid field value (e.g. unknown channel type).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteChannel
       tags: [servers]
