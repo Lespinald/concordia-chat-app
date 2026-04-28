@@ -283,6 +283,7 @@ services:
       VOICE_PORT: "${VOICE_PORT:-8084}"
       REDIS_ADDR: redis://redis:6379
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+      GRPC_ADDR: "servers:50051"
     healthcheck:
       test:
         [
