@@ -21,19 +21,12 @@ public class MembershipController {
     }
 
     @PostMapping("/join")
-    public ResponseEntity<?> joinServer(
+    public ResponseEntity<Void> joinServer(
             @PathVariable UUID serverId,
             @RequestHeader("X-User-Id") String userId) {
-        try {
-            membershipService.joinServer(serverId, userId);
-            return ResponseEntity.ok().build(); // DoD: HTTP 200
-        } catch (ResponseStatusException e) {
-            // DoD: HTTP 409 with specific JSON format
-            if (e.getStatusCode() == HttpStatus.CONFLICT) {
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", e.getReason()));
-            }
-            throw e;
-        }
+
+        membershipService.joinServer(serverId, userId);
+        return ResponseEntity.ok().build();
     }
 
     @DeleteMapping("/leave")

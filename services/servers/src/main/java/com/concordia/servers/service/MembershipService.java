@@ -62,7 +62,7 @@ public class MembershipService {
         membershipRepository.deleteByServerIdAndUserId(serverId, userId);
 
     }
-
+    @Transactional(readOnly = true)
     public List<Map<String, String>> getServerMembers(UUID serverId) {
         if (!serverRepository.existsById(serverId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Server not found");
@@ -73,7 +73,8 @@ public class MembershipService {
         // DoD: returns list with user_id and username
         return memberships.stream().map(m -> Map.of(
                 "user_id", m.getUserId(),
-                "username", "User_" + m.getUserId() // Mocked value pending Users service integration
+                // TODO(T-39): replace with users_cache lookup once Kafka consumer is implemented
+                "username", "User_" + m.getUserId()
         )).collect(Collectors.toList());
     }
 }
