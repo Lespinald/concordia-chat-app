@@ -12,6 +12,7 @@ npm-debug.log*
 *.out
 /gateway
 /presence
+vendor/
 
 # Rust
 target/
