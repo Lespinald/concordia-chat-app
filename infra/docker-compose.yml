@@ -10,7 +10,7 @@ services:
   # ── Message broker ────────────────────────────────────────────
 
   zookeeper:
-    image: bitnami/zookeeper:latest
+    image: bitnamilegacy/zookeeper:3.9
     container_name: zookeeper
     restart: unless-stopped
     environment:
@@ -25,7 +25,7 @@ services:
       start_period: 15s
 
   kafka:
-    image: bitnami/kafka:latest
+    image: bitnamilegacy/kafka:3.8
     container_name: kafka
     restart: unless-stopped
     depends_on:
@@ -58,7 +58,7 @@ services:
   # One-shot init container: creates the three application topics once Kafka is healthy.
   # Uses the INTERNAL listener (kafka:9093) so it works entirely inside the Docker network.
   kafka-init:
-    image: bitnami/kafka:latest
+    image: bitnamilegacy/kafka:3.8
     container_name: kafka-init
     restart: "no"
     depends_on:
