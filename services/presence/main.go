@@ -26,12 +26,18 @@ func main() {
 	log.Printf("presence: connected to Redis at %s", redisAddr)
 
 	port := getenv("PRESENCE_PORT", "8086")
+	h := newHandler(rdb)
 
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"status":"ok"}`)
 	})
+	mux.HandleFunc("POST /sessions", h.register)
+	mux.HandleFunc("DELETE /sessions/{connID}", h.deregister)
+	mux.HandleFunc("PUT /sessions/{connID}/heartbeat", h.heartbeat)
+	mux.HandleFunc("GET /sessions", h.query)
 
 	log.Printf("presence: starting on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, nil))
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }

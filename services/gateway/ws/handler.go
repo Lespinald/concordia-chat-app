@@ -94,6 +94,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Deregistration runs in the same goroutine after the read loop exits.
 	defer h.deregisterSession(connID)
 
+	// Send a heartbeat to Presence every 2 minutes to reset the 30-minute TTL.
+	hbCtx, hbCancel := context.WithCancel(context.Background())
+	defer hbCancel()
+	go h.runHeartbeats(hbCtx, connID)
+
 	if err := writeJSON(conn, outMsg{Type: "connected"}); err != nil {
 		return
 	}
@@ -153,6 +158,30 @@ func (h *Handler) forwardToChat(conn *websocket.Conn, userID string, in *inMsg) 
 }
 
 // --- presence calls ---
+
+const heartbeatInterval = 2 * time.Minute
+
+func (h *Handler) runHeartbeats(ctx context.Context, connID string) {
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			hbCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			req, _ := http.NewRequestWithContext(hbCtx, http.MethodPut,
+				h.presenceURL+"/sessions/"+connID+"/heartbeat", nil)
+			resp, err := h.client.Do(req)
+			cancel()
+			if err != nil {
+				log.Printf("ws: heartbeat %q: %v", connID, err)
+			} else {
+				resp.Body.Close()
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
+}
 
 func (h *Handler) registerSession(userID, connID string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
