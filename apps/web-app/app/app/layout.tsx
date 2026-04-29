@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import ServerSidebar from '@/components/ServerSidebar';
 
 const PLACEHOLDER_SERVERS = [
   { id: 's1', letter: 'G', color: '#6366f1' },
@@ -8,10 +9,10 @@ const PLACEHOLDER_SERVERS = [
 
 const PLACEHOLDER_CHANNELS = ['general', 'random', 'announcements', 'off-topic'];
 
-function ServerSidebar() {
+{/* function ServerSidebar() {
   return (
     <nav className="w-[72px] bg-[#09090b] border-r border-[#1a1a1d] flex flex-col items-center py-3 gap-0.5 overflow-y-auto shrink-0">
-      {/* Home / DMs */}
+      {// Home / DMs }
       <div className="relative py-1 group/icon">
         <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-sm bg-white h-9" />
         <div className="ml-3 w-12 h-12 rounded-2xl bg-indigo-500 flex items-center justify-center cursor-pointer">
@@ -42,7 +43,7 @@ function ServerSidebar() {
       </div>
     </nav>
   );
-}
+}*/}
 
 function ChannelSidebar() {
   return (

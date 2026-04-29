@@ -6,6 +6,42 @@ import { useState } from 'react';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+
+    try {
+      const res = await fetch('http://localhost:3000/auth/login', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        setError(data?.message || 'Invalid credentials');
+        setLoading(false);
+        return;
+      }
+
+      const data = await res.json();
+
+      localStorage.setItem('accessToken', data.accessToken);
+
+      window.location.href = '/app';
+    } catch (err) {
+      console.error(err);
+      setError('Something went wrong. Try again.');
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#09090b] px-6">
@@ -17,7 +53,12 @@ export default function LoginPage() {
           backgroundSize: '40px 40px',
         }}
       />
-      <div className="relative z-10 w-full max-w-sm bg-[#18181b] border border-[#27272a] rounded-xl px-10 py-9 shadow-[0_25px_50px_rgba(0,0,0,0.5)]">
+
+      <form
+        onSubmit={handleLogin}
+        className="relative z-10 w-full max-w-sm bg-[#18181b] border border-[#27272a] rounded-xl px-10 py-9 shadow-[0_25px_50px_rgba(0,0,0,0.5)]"
+      >
+        {/* Header */}
         <div className="flex items-center gap-2.5 mb-7">
           <div className="w-9 h-9 rounded-lg bg-indigo-500 flex items-center justify-center font-bold text-white text-lg shrink-0">
             C
@@ -25,9 +66,21 @@ export default function LoginPage() {
           <span className="text-xl font-bold tracking-tight text-white">Concordia</span>
         </div>
 
-        <h1 className="text-[22px] font-bold tracking-tight text-white mb-1">Welcome back</h1>
-        <p className="text-sm text-zinc-500 mb-6">Sign in to your account to continue.</p>
+        <h1 className="text-[22px] font-bold tracking-tight text-white mb-1">
+          Welcome back
+        </h1>
+        <p className="text-sm text-zinc-500 mb-6">
+          Sign in to your account to continue.
+        </p>
 
+        {/* Error message */}
+        {error && (
+          <div className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2">
+            {error}
+          </div>
+        )}
+
+        {/* Email */}
         <div className="mb-4">
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-zinc-400 mb-1.5">
             Email
@@ -37,9 +90,12 @@ export default function LoginPage() {
             placeholder="you@example.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            required
             className="w-full bg-[#09090b] border border-zinc-700 rounded-md text-sm text-white px-3 py-2.5 outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-600"
           />
         </div>
+
+        {/* Password */}
         <div className="mb-4">
           <label className="block text-[11px] font-semibold uppercase tracking-widest text-zinc-400 mb-1.5">
             Password
@@ -49,39 +105,62 @@ export default function LoginPage() {
             placeholder="••••••••"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            required
             className="w-full bg-[#09090b] border border-zinc-700 rounded-md text-sm text-white px-3 py-2.5 outline-none focus:border-indigo-500 transition-colors placeholder:text-zinc-600"
           />
         </div>
+
+        {/* Forgot password */}
         <div className="text-right mb-5">
-          <span className="text-xs text-indigo-400 cursor-pointer hover:text-indigo-300">Forgot password?</span>
+          <span className="text-xs text-indigo-400 cursor-pointer hover:text-indigo-300">
+            Forgot password?
+          </span>
         </div>
 
-        <button className="w-full bg-indigo-500 hover:bg-indigo-600 transition-colors text-white text-sm font-medium py-2.5 rounded-md cursor-pointer">
-          Sign in
+        {/* Submit */}
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full bg-indigo-500 hover:bg-indigo-600 transition-colors text-white text-sm font-medium py-2.5 rounded-md cursor-pointer disabled:opacity-60"
+        >
+          {loading ? 'Signing in...' : 'Sign in'}
         </button>
 
+        {/* Divider */}
         <div className="flex items-center gap-3 my-5">
           <div className="flex-1 h-px bg-[#27272a]" />
           <span className="text-xs text-zinc-600">or</span>
           <div className="flex-1 h-px bg-[#27272a]" />
         </div>
 
+        {/* OAuth buttons UI only for now */}
         <div className="flex flex-col gap-2 mb-6">
-          <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md border border-zinc-700 bg-[#18181b] hover:bg-[#27272a] transition-colors text-white text-sm font-medium cursor-pointer">
+          <button
+            type="button"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md border border-zinc-700 bg-[#18181b] hover:bg-[#27272a] transition-colors text-white text-sm font-medium cursor-pointer"
+          >
             <span>🔵</span> Continue with Google
           </button>
-          <button className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md border border-zinc-700 bg-[#18181b] hover:bg-[#27272a] transition-colors text-white text-sm font-medium cursor-pointer">
+
+          <button
+            type="button"
+            className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md border border-zinc-700 bg-[#18181b] hover:bg-[#27272a] transition-colors text-white text-sm font-medium cursor-pointer"
+          >
             <span>⬛</span> Continue with GitHub
           </button>
         </div>
 
+        {/* Register link */}
         <p className="text-sm text-zinc-500 text-center">
           Don&apos;t have an account?{' '}
-          <Link href="/register" className="text-indigo-400 font-medium hover:text-indigo-300">
+          <Link
+            href="/register"
+            className="text-indigo-400 font-medium hover:text-indigo-300"
+          >
             Sign up
           </Link>
         </p>
-      </div>
+      </form>
     </div>
   );
 }
