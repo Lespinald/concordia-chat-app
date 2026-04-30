@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { logoutAction } from '@/app/actions/auth';
 
 const PLACEHOLDER_SERVERS = [
   { id: 's1', letter: 'G', color: '#6366f1' },
@@ -68,7 +69,7 @@ function ChannelSidebar() {
 
       {/* User bar */}
       <div className="border-t border-[#1a1a1d] p-2">
-        <div className="flex items-center gap-2 px-1 py-1 rounded-md hover:bg-[#27272a] cursor-pointer transition-colors">
+        <div className="flex items-center gap-2 px-1 py-1 rounded-md hover:bg-[#27272a] transition-colors">
           <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-white font-bold text-sm shrink-0 relative">
             U
             <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-500 border-2 border-[#111113]" />
@@ -77,10 +78,19 @@ function ChannelSidebar() {
             <div className="text-[13px] font-semibold text-zinc-100 truncate">username</div>
             <div className="text-[11px] text-zinc-500 truncate">#0001</div>
           </div>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" className="text-zinc-500 shrink-0">
-            <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
-            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" strokeWidth="2" />
-          </svg>
+          <form action={logoutAction}>
+            <button
+              type="submit"
+              title="Sign out"
+              className="text-zinc-500 hover:text-red-400 transition-colors cursor-pointer p-1 rounded"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+            </button>
+          </form>
         </div>
       </div>
     </div>

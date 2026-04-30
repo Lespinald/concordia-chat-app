@@ -1,25 +1,29 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
+import { registerAction } from '@/app/actions/auth';
 
 type FormFields = { username: string; email: string; password: string; confirm: string };
 type FormErrors = Partial<FormFields>;
 
 const STATUS_OPTIONS = [
-  { value: 'online',  label: 'Online',          color: '#22c55e' },
-  { value: 'away',    label: 'Away',            color: '#eab308' },
-  { value: 'dnd',     label: 'Do Not Disturb',  color: '#ef4444' },
-  { value: 'offline', label: 'Invisible',       color: '#71717a' },
+  { value: 'online',  label: 'Online',         color: '#22c55e' },
+  { value: 'away',    label: 'Away',           color: '#eab308' },
+  { value: 'dnd',     label: 'Do Not Disturb', color: '#ef4444' },
+  { value: 'offline', label: 'Invisible',      color: '#71717a' },
 ];
 
 export default function RegisterPage() {
   const [step, setStep] = useState<1 | 2>(1);
   const [form, setForm] = useState<FormFields>({ username: '', email: '', password: '', confirm: '' });
   const [errors, setErrors] = useState<FormErrors>({});
+  const [serverError, setServerError] = useState<string | null>(null);
   const [status, setStatus] = useState('online');
+  const [isPending, startTransition] = useTransition();
 
-  const set = (key: keyof FormFields) => (val: string) => setForm((f) => ({ ...f, [key]: val }));
+  const set = (key: keyof FormFields) => (val: string) =>
+    setForm((f) => ({ ...f, [key]: val }));
 
   const validateStep1 = (): boolean => {
     const e: FormErrors = {};
@@ -29,6 +33,18 @@ export default function RegisterPage() {
     if (form.password !== form.confirm) e.confirm = 'Passwords do not match.';
     setErrors(e);
     return Object.keys(e).length === 0;
+  };
+
+  const handleCreateAccount = () => {
+    setServerError(null);
+    const fd = new FormData();
+    fd.set('username', form.username);
+    fd.set('email', form.email);
+    fd.set('password', form.password);
+    startTransition(async () => {
+      const result = await registerAction(undefined, fd);
+      if (result?.error) setServerError(result.error);
+    });
   };
 
   return (
@@ -129,8 +145,18 @@ export default function RegisterPage() {
               ))}
             </div>
 
-            <button className="w-full bg-indigo-500 hover:bg-indigo-600 transition-colors text-white text-sm font-medium py-2.5 rounded-md cursor-pointer mb-3">
-              Create Account
+            {serverError && (
+              <div className="mb-4 px-3 py-2.5 rounded-md bg-red-500/10 border border-red-500/30 text-sm text-red-400">
+                {serverError}
+              </div>
+            )}
+
+            <button
+              onClick={handleCreateAccount}
+              disabled={isPending}
+              className="w-full bg-indigo-500 hover:bg-indigo-600 disabled:opacity-60 transition-colors text-white text-sm font-medium py-2.5 rounded-md cursor-pointer mb-3"
+            >
+              {isPending ? 'Creating account…' : 'Create Account'}
             </button>
             <div className="text-center">
               <button onClick={() => setStep(1)} className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer">
