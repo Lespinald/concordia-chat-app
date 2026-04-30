@@ -49,7 +49,13 @@ Go through each DoD criterion one by one. For each one:
 2. Run the concrete command it describes if you can (build, test, curl, lint, grpcurl, etc.).
 3. Mark it **✅ PASS** or **❌ FAIL** with a one-line explanation of the evidence.
 
-If a criterion requires a live environment (running Docker stack, real database, browser, hardware microphone), implement the code correctly and mark that criterion as **⚠️ NEEDS LIVE ENV** with a note on what command to run manually.
+If a criterion requires a live environment (running Docker stack, real database, browser, hardware microphone), implement the code correctly and mark that criterion as **⚠️ NEEDS LIVE ENV**. Tell the user to bring up the full stack with:
+
+```
+docker-compose --env-file infra/.env -f infra/docker-compose.yml up --build
+```
+
+Never attempt to start individual services or components in isolation — partial stack runs produce misleading errors (missing dependencies, wrong env, port conflicts) and waste the user's time. If verification needs a running service, the answer is always the full stack command above, not a one-off `go run`, `uvicorn`, `cargo run`, etc.
 
 ## Step 7 — Report the outcome
 
@@ -62,3 +68,4 @@ If a criterion requires a live environment (running Docker stack, real database,
 - Never declare DONE unless every DoD criterion is either ✅ PASS or explicitly ⚠️ NEEDS LIVE ENV.
 - Prefer editing existing files over creating new ones.
 - If the task's DoD references a command, run it — do not assume it will pass.
+- Never start the project or any individual service in isolation (no `go run`, `uvicorn`, `cargo run`, `npm run dev`, `java -jar`, etc.). Starting components alone produces spurious errors due to missing dependencies. If the verification needs a live environment, tell the user to run the full stack with `docker-compose --env-file infra/.env -f infra/docker-compose.yml up --build` and mark the criterion ⚠️ NEEDS LIVE ENV.
