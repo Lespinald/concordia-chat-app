@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiFetch } from '@/app/lib/api';
+import SendTipModal from '@/app/components/SendTipModal';
 
 interface Message {
   message_id: string;
@@ -48,6 +49,8 @@ export default function MessageList({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [tippingUser, setTippingUser] = useState<{ id: string; name: string } | null>(null);
+  const [tipToast, setTipToast] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -237,6 +240,15 @@ export default function MessageList({
                   </p>
                 </div>
 
+                {!isOwn && (
+                  <button
+                    onClick={() => setTippingUser({ id: msg.author_id, name: displayName(msg) })}
+                    title="Send tip"
+                    className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded text-zinc-600 hover:text-yellow-400 transition-all cursor-pointer text-sm"
+                  >
+                    💸
+                  </button>
+                )}
                 {isOwn && (
                   <button
                     onClick={() => handleDelete(msg)}
@@ -264,6 +276,25 @@ export default function MessageList({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tippingUser && (
+        <SendTipModal
+          recipientId={tippingUser.id}
+          recipientName={tippingUser.name}
+          currentUserId={currentUserId ?? undefined}
+          onClose={() => setTippingUser(null)}
+          onSuccess={(msg) => {
+            setTippingUser(null);
+            setTipToast(msg);
+            setTimeout(() => setTipToast(null), 3000);
+          }}
+        />
+      )}
+      {tipToast && (
+        <div className="fixed bottom-6 right-6 px-4 py-2 bg-green-900/80 border border-green-700/50 text-green-400 text-sm rounded-lg shadow-lg z-40">
+          {tipToast}
         </div>
       )}
     </div>
