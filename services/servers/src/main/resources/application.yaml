@@ -4,8 +4,9 @@ server:
 spring:
   datasource:
     url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/servers_db}
-    username: ${POSTGRES_USER:postgres}
-    password: ${POSTGRES_PASSWORD:postgres}
+    username: discord
+    password: discord
   flyway:
     enabled: true
     baseline-on-migrate: true
+    

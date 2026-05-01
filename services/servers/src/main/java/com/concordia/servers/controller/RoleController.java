@@ -6,6 +6,7 @@ import com.concordia.servers.service.RoleService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.util.Map;
 import java.util.Set;
@@ -38,11 +39,13 @@ public class RoleController {
             @PathVariable String userId,
             @RequestBody Map<String, UUID> requestBody,
             @RequestHeader("X-User-Id") String requesterId) {
-
+        
         UUID roleId = requestBody.get("roleId");
+        if (roleId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "roleId is required in request body");
+        }
+        
         roleService.assignRole(serverId, userId, roleId, requesterId);
         return ResponseEntity.ok().build();
     }
 }
-
-record RoleRequest(String name, Set<Permission> permissions) {}

@@ -21,7 +21,6 @@ public interface RoleRepository extends JpaRepository<Role, UUID> {
     List<Role> findRolesByUserAndServer(@Param("serverId") UUID serverId, @Param("userId") String userId);
 
     @Modifying
-    @Transactional
     @Query(value = "INSERT INTO membership_roles (server_id, user_id, role_id) VALUES (:serverId, :userId, :roleId) ON CONFLICT DO NOTHING", nativeQuery = true)
     void assignRoleToMember(@Param("serverId") UUID serverId, @Param("userId") String userId, @Param("roleId") UUID roleId);
 }

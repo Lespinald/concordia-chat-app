@@ -1,10 +1,6 @@
 ALTER TABLE IF EXISTS permissions RENAME TO role_permissions;
 
-CREATE TABLE IF NOT EXISTS role_permissions (
-    role_id UUID REFERENCES roles(id) ON DELETE CASCADE,
-    permission VARCHAR(100) NOT NULL,
-    PRIMARY KEY (role_id, permission)
-);
+ALTER TABLE roles ADD CONSTRAINT uq_roles_server_name UNIQUE (server_id, name);
 
 CREATE TABLE IF NOT EXISTS membership_roles (
     server_id UUID NOT NULL,
