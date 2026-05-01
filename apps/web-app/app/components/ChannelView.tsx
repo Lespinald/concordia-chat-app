@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { apiFetch } from '@/app/lib/api';
 import MessageList from '@/app/components/MessageList';
 import MessageInput from '@/app/components/MessageInput';
+import VoiceChannelView from '@/app/components/VoiceChannelView';
 
 interface Channel {
   channel_id: string;
@@ -146,6 +147,10 @@ export default function ChannelView({
   }
 
   const channelName = channel?.name ?? channelId.slice(0, 8);
+
+  if (channel?.type === 'VOICE') {
+    return <VoiceChannelView key={channelId} channelId={channelId} channelName={channel.name} />;
+  }
 
   return (
     <div className="flex flex-col h-full">

@@ -234,7 +234,12 @@ export default function ChannelSidebar() {
               {voiceChannels.map((ch) => (
                 <div
                   key={ch.channel_id}
-                  className="flex items-center gap-1.5 px-2 py-[5px] rounded-md cursor-pointer text-sm text-zinc-400 hover:bg-[#1f1f22] hover:text-zinc-100 transition-colors"
+                  onClick={() => router.push(`/app/servers/${serverId}/channels/${ch.channel_id}`)}
+                  className={`flex items-center gap-1.5 px-2 py-[5px] rounded-md cursor-pointer text-sm transition-colors ${
+                    ch.channel_id === activeChannelId
+                      ? 'bg-[#27272a] text-zinc-100'
+                      : 'text-zinc-400 hover:bg-[#1f1f22] hover:text-zinc-100'
+                  }`}
                 >
                   <span className="text-zinc-600 text-sm shrink-0">🔊</span>
                   <span className="truncate">{ch.name}</span>
