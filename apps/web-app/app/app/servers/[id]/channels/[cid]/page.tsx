@@ -34,3 +34,9 @@ export default async function ChannelPage({
     </div>
   );
 }
+
+
+
+export function generateStaticParams() {
+  return [{ id: "default", cid: "default" }];
+}
