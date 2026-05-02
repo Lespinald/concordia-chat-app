@@ -1,3 +1,6 @@
+
+# T-
+
 [package]
 name = "chat-service"
 version = "0.1.0"
@@ -14,3 +17,20 @@ anyhow = "1.0"
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+
+# --- Lo NUEVO que necesitamos para el T-27 ---
+# gRPC para verificar permisos (CheckPerm)
+tonic = "0.11"
+prost = "0.12"
+
+# Kafka para publicar el evento "message-created"
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl"] }
+
+# UUID v7 y fechas requeridas por el ticket
+uuid = { version = "1.8", features = ["v7", "serde", "v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Esto le dice a Rust cómo compilar los archivos .proto de gRPC
+[build-dependencies]
+tonic-build = "0.11"
