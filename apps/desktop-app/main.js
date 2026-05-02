@@ -1,16 +1,32 @@
-const { app, BrowserWindow, Menu, protocol } = require('electron');
+const { app, BrowserWindow, Menu, protocol, Tray, nativeImage } = require('electron');
 const path = require('path');
 const serve = require('electron-serve').default;
 
 const loadURL = serve({ directory: path.join(__dirname, '../web-app/out') });
 
-// Register the scheme as standard to ensure CORS and fetch work properly
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } }
-]);
+// Reverted manual `app` protocol registration since electron-serve registers it internally automatically.
+// protocol.registerSchemesAsPrivileged([...])
+
+let mainWindow = null;
+let tray = null;
+let isQuitting = false;
+
+// Force single instance to avoid zombie processes
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
 
 function createWindow() {
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1024,
     height: 768,
     minWidth: 1024,
@@ -26,7 +42,6 @@ function createWindow() {
   const isMac = process.platform === 'darwin';
 
   const template = [
-    // App menu (macOS only)
     ...(isMac
       ? [{
           label: app.name,
@@ -39,14 +54,28 @@ function createWindow() {
             { role: 'hideOthers' },
             { role: 'unhide' },
             { type: 'separator' },
-            { role: 'quit' }
+            {
+              label: 'Quit',
+              accelerator: 'Command+Q',
+              click: () => {
+                isQuitting = true;
+                app.quit();
+              }
+            }
           ]
         }]
       : []),
     {
       label: 'File',
       submenu: [
-        isMac ? { role: 'close' } : { role: 'quit' }
+        isMac ? { role: 'close' } : {
+          label: 'Quit',
+          accelerator: 'Ctrl+Q',
+          click: () => {
+            isQuitting = true;
+            app.quit();
+          }
+        }
       ]
     },
     {
@@ -107,16 +136,86 @@ function createWindow() {
 
   const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      // Only hide the window on close to simulate minimization to tray
+      mainWindow.hide();
+    }
+  });
 }
+
+function createTray() {
+  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  // Load and scale explicitly to prevent missing/corrupt icon buffers in Linux GTK/Qt bounds
+  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Open',
+      click: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        } else {
+          createWindow();
+        }
+      }
+    },
+    {
+      label: 'Quit',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  
+  tray.setToolTip('Concordia');
+  tray.setContextMenu(contextMenu);
+  
+  tray.on('click', () => {
+    if (mainWindow) {
+      if (mainWindow.isVisible()) {
+         mainWindow.hide();
+      } else {
+         mainWindow.show();
+         mainWindow.focus();
+      }
+    }
+  });
+
+  tray.on('double-click', () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    } else {
+      createWindow();
+    }
+  });
+}
+
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
+app.on('window-all-closed', (e) => {
+  // Completely empty. We do nothing on window-all-closed.
+  // This is the safest way to ensure the app never quits automatically on any OS.
+});
 
 app.whenReady().then(() => {
   createWindow();
+  // Tray must be created AFTER ready but sometimes needs a slight tick in Linux
+  setTimeout(createTray, 200);
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    else if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
   });
-});
-
-app.on('window-all-closed', function () {
-  if (process.platform !== 'darwin') app.quit();
 });
