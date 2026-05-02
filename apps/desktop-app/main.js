@@ -1,6 +1,13 @@
-const { app, BrowserWindow, Menu, protocol, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, Menu, protocol, Tray, nativeImage, ipcMain, Notification } = require('electron');
 const path = require('path');
 const serve = require('electron-serve').default;
+const Store = require('electron-store');
+
+const store = new Store({
+  defaults: {
+    notificationsEnabled: true
+  }
+});
 
 const loadURL = serve({ directory: path.join(__dirname, '../web-app/out') });
 
@@ -33,7 +40,8 @@ function createWindow() {
     minHeight: 768,
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js')
     }
   });
 
@@ -197,6 +205,44 @@ function createTray() {
   });
 }
 
+// IPC Handlers for Notifications
+ipcMain.handle('get-notification-preference', () => {
+  return store.get('notificationsEnabled', true);
+});
+
+ipcMain.on('set-notification-preference', (event, enabled) => {
+  store.set('notificationsEnabled', enabled);
+});
+
+ipcMain.on('show-notification', (event, { title, body, channelUrl }) => {
+  const notificationsEnabled = store.get('notificationsEnabled', true);
+  
+  // Show notification only if enabled AND window is not focused (minimized, hidden, or blurred)
+  if (notificationsEnabled && (!mainWindow || !mainWindow.isFocused())) {
+    if (Notification.isSupported()) {
+      const notification = new Notification({
+        title,
+        body: body.substring(0, 100), // Max 100 chars as requested
+        icon: path.join(__dirname, 'assets', 'tray-icon.png')
+      });
+      
+      notification.on('click', () => {
+        if (mainWindow) {
+          if (mainWindow.isMinimized()) mainWindow.restore();
+          if (!mainWindow.isVisible()) mainWindow.show();
+          mainWindow.focus();
+          
+          if (channelUrl) {
+            mainWindow.webContents.send('navigate-to-channel', channelUrl);
+          }
+        }
+      });
+      
+      notification.show();
+    }
+  }
+});
+
 app.on('before-quit', () => {
   isQuitting = true;
 });
@@ -207,6 +253,13 @@ app.on('window-all-closed', (e) => {
 });
 
 app.whenReady().then(() => {
+  // Request notification permission on macOS
+  if (process.platform === 'darwin' && Notification.isSupported()) {
+    // There is no explicit native prompt API for notifications in Electron (macOS asks automatically on first .show())
+    // but requesting user attention via dock bounce validates system engagement
+    app.dock.bounce();
+  }
+
   createWindow();
   // Tray must be created AFTER ready but sometimes needs a slight tick in Linux
   setTimeout(createTray, 200);

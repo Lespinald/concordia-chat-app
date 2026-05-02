@@ -11,6 +11,7 @@
     "electron": "^41.5.0"
   },
   "dependencies": {
-    "electron-serve": "^3.0.1"
+    "electron-serve": "^3.0.1",
+    "electron-store": "^11.0.2"
   }
 }
