@@ -12,6 +12,7 @@ from redis import asyncio as aioredis
 
 import check_perm_pb2
 import check_perm_pb2_grpc
+import signaling
 
 REDIS_URL = os.getenv("REDIS_ADDR", "redis://localhost:6379")
 GRPC_ADDR = os.getenv("GRPC_ADDR", "servers:50051")
@@ -26,10 +27,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         raise RuntimeError(f"Could not connect to Redis at {REDIS_URL}: {e}")
     yield
-    await app.state.redis.close()
+    await app.state.redis.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(signaling.router)
 
 
 class JoinResponse(BaseModel):
@@ -118,6 +120,12 @@ async def join_voice_channel(channel_id: str, request: Request):
     await redis.expire(members_key, SESSION_TTL)
     await redis.expire(session_key, SESSION_TTL)
 
+    # DoD T-46: Notificar a los clientes conectados en el WebRTC que alguien entró
+    await signaling.manager.broadcast({
+        "type": "participant_joined",
+        "user_id": user_id
+    }, channel_id, exclude_user_id=user_id)
+
     return JoinResponse(
         session_id=session_id,
         channel_id=channel_id,
@@ -132,6 +140,12 @@ async def leave_voice_channel(channel_id: str, request: Request):
     redis = request.app.state.redis
     await redis.zrem(f"voice:channel:{channel_id}:users", user_id)
     await redis.delete(f"voice:session:{channel_id}:{user_id}")
+
+    # DoD T-46: Notificar a los clientes restantes en el WebRTC que alguien salió
+    await signaling.manager.broadcast({
+        "type": "participant_left",
+        "user_id": user_id
+    }, channel_id, exclude_user_id=user_id)
 
 
 @app.get("/voice/{channel_id}/participants", response_model=ParticipantsResponse)

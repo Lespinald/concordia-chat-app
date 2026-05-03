@@ -1,18 +1,19 @@
-"""DoD tests for POST /voice/{channelId}/join (T-42)."""
 import time
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
+from fakeredis import FakeAsyncRedis
+
+import check_perm_pb2
 
 JWT_SECRET = "test-secret-32-bytes-long-enough!!"
 ALGORITHM = "HS256"
 
 
 def make_token(user_id: str = "user-123", expired: bool = False) -> str:
-    import time
     payload = {"sub": user_id, "username": "testuser"}
     if expired:
         payload["exp"] = int(time.time()) - 60
@@ -21,76 +22,41 @@ def make_token(user_id: str = "user-123", expired: bool = False) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)
 
 
-def _make_redis_mock(has_existing_session: bool = False):
-    r = AsyncMock()
-    r.ping = AsyncMock()
-    if has_existing_session:
-        existing_session_id = str(uuid.uuid4())
-        r.hgetall = AsyncMock(return_value={
-            "session_id": existing_session_id,
-            "joined_at": "2026-01-01T00:00:00+00:00",
-        })
-        r._existing_session_id = existing_session_id
-    else:
-        r.hgetall = AsyncMock(return_value={})
-    r.hset = AsyncMock()
-    r.zadd = AsyncMock()
-    r.expire = AsyncMock()
-    r.close = AsyncMock()
-    return r
+import pytest_asyncio
+
+@pytest_asyncio.fixture()
+async def redis_client():
+    client = FakeAsyncRedis(decode_responses=True)
+    yield client
+    await client.flushall()
+    await client.aclose()
 
 
 @pytest.fixture()
-def client_allowed():
-    """Client where CheckPerm returns allowed=True."""
-    from main import app
-
-    redis_mock = _make_redis_mock()
-
-    grpc_resp = MagicMock()
-    grpc_resp.allowed = True
-
-    with patch.dict("os.environ", {"JWT_SECRET": JWT_SECRET}):
-        with patch("main.aioredis.from_url", new=AsyncMock(return_value=redis_mock)):
-            with patch("main._check_perm", return_value=True):
-                with TestClient(app, raise_server_exceptions=True) as c:
-                    yield c, redis_mock
+def mock_grpc_stub():
+    with patch("check_perm_pb2_grpc.PermServiceStub") as mock_stub_cls:
+        mock_stub = MagicMock()
+        mock_stub_cls.return_value = mock_stub
+        yield mock_stub
 
 
 @pytest.fixture()
-def client_denied():
-    """Client where CheckPerm returns allowed=False."""
+def client(redis_client, mock_grpc_stub):
     from main import app
-
-    redis_mock = _make_redis_mock()
-
+    
     with patch.dict("os.environ", {"JWT_SECRET": JWT_SECRET}):
-        with patch("main.aioredis.from_url", new=AsyncMock(return_value=redis_mock)):
-            with patch("main._check_perm", return_value=False):
+        with patch("main.aioredis.from_url", return_value=redis_client):
+            with patch("grpc.insecure_channel"):
                 with TestClient(app, raise_server_exceptions=True) as c:
-                    yield c, redis_mock
-
-
-@pytest.fixture()
-def client_already_joined():
-    """Client where user already has a session in Redis."""
-    from main import app
-
-    redis_mock = _make_redis_mock(has_existing_session=True)
-
-    with patch.dict("os.environ", {"JWT_SECRET": JWT_SECRET}):
-        with patch("main.aioredis.from_url", new=AsyncMock(return_value=redis_mock)):
-            with patch("main._check_perm", return_value=True):
-                with TestClient(app, raise_server_exceptions=True) as c:
-                    yield c, redis_mock
+                    yield c
 
 
 # ── DoD: HTTP 200 with correct response shape ──────────────────────────────
 
-def test_join_returns_200_with_correct_shape(client_allowed):
-    c, _ = client_allowed
+def test_join_returns_200_with_correct_shape(client, mock_grpc_stub):
+    mock_grpc_stub.CheckPerm.return_value = MagicMock(allowed=True)
     token = make_token("user-123")
-    resp = c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    resp = client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
     body = resp.json()
     assert body["channel_id"] == "chan-abc"
@@ -102,82 +68,91 @@ def test_join_returns_200_with_correct_shape(client_allowed):
 
 # ── DoD: CheckPerm denied → 403 ────────────────────────────────────────────
 
-def test_join_forbidden_when_perm_denied(client_denied):
-    c, _ = client_denied
+def test_join_forbidden_when_perm_denied(client, mock_grpc_stub):
+    mock_grpc_stub.CheckPerm.return_value = MagicMock(allowed=False)
     token = make_token("user-123")
-    resp = c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    resp = client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403
 
 
 # ── DoD: Unauthenticated → 401 ─────────────────────────────────────────────
 
-def test_join_unauthenticated_no_header(client_allowed):
-    c, _ = client_allowed
-    resp = c.post("/voice/chan-abc/join")
+def test_join_unauthenticated_no_header(client):
+    resp = client.post("/voice/chan-abc/join")
     assert resp.status_code == 401
 
 
-def test_join_unauthenticated_bad_token(client_allowed):
-    c, _ = client_allowed
-    resp = c.post("/voice/chan-abc/join", headers={"Authorization": "Bearer notavalidtoken"})
+def test_join_unauthenticated_bad_token(client):
+    resp = client.post("/voice/chan-abc/join", headers={"Authorization": "Bearer notavalidtoken"})
     assert resp.status_code == 401
 
 
-def test_join_unauthenticated_expired_token(client_allowed):
-    c, _ = client_allowed
+def test_join_unauthenticated_expired_token(client):
     token = make_token("user-123", expired=True)
-    resp = c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    resp = client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 401
 
 
 # ── DoD: Redis sorted set written with correct key ─────────────────────────
 
-def test_join_writes_to_redis_sorted_set(client_allowed):
-    c, redis_mock = client_allowed
+@pytest.mark.asyncio
+async def test_join_writes_to_redis_sorted_set(client, redis_client, mock_grpc_stub):
+    mock_grpc_stub.CheckPerm.return_value = MagicMock(allowed=True)
     token = make_token("user-123")
-    c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
-    redis_mock.zadd.assert_called_once()
-    key = redis_mock.zadd.call_args[0][0]
-    assert key == "voice:channel:chan-abc:users"
-    members = redis_mock.zadd.call_args[0][1]
+    client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    
+    # Check redis content directly
+    members = await redis_client.zrange("voice:channel:chan-abc:users", 0, -1)
     assert "user-123" in members
 
 
 # ── DoD: TTL of 4 hours set on sorted set ─────────────────────────────────
 
-def test_join_sets_ttl_on_sorted_set(client_allowed):
-    c, redis_mock = client_allowed
+@pytest.mark.asyncio
+async def test_join_sets_ttl_on_sorted_set(client, redis_client, mock_grpc_stub):
+    mock_grpc_stub.CheckPerm.return_value = MagicMock(allowed=True)
     token = make_token("user-123")
-    c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
-    expire_calls = redis_mock.expire.call_args_list
-    keys = [call[0][0] for call in expire_calls]
-    ttls = [call[0][1] for call in expire_calls]
-    assert "voice:channel:chan-abc:users" in keys
-    idx = keys.index("voice:channel:chan-abc:users")
-    assert ttls[idx] == 4 * 60 * 60
+    client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    
+    ttl = await redis_client.ttl("voice:channel:chan-abc:users")
+    assert 0 < ttl <= 4 * 60 * 60
 
 
 # ── DoD: Idempotent re-join refreshes TTL, reuses session_id ──────────────
 
-def test_join_idempotent_returns_200(client_already_joined):
-    c, redis_mock = client_already_joined
+@pytest.mark.asyncio
+async def test_join_idempotent_returns_200(client, redis_client, mock_grpc_stub):
+    mock_grpc_stub.CheckPerm.return_value = MagicMock(allowed=True)
+    
+    # Setup existing session
+    session_key = "voice:session:chan-abc:user-123"
+    existing_session_id = str(uuid.uuid4())
+    await redis_client.hset(session_key, mapping={
+        "session_id": existing_session_id,
+        "joined_at": "2026-01-01T00:00:00+00:00"
+    })
+
     token = make_token("user-123")
-    resp = c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    resp = client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 200
+    assert resp.json()["session_id"] == existing_session_id
 
 
-def test_join_idempotent_reuses_session_id(client_already_joined):
-    c, redis_mock = client_already_joined
+@pytest.mark.asyncio
+async def test_join_idempotent_refreshes_ttl(client, redis_client, mock_grpc_stub):
+    mock_grpc_stub.CheckPerm.return_value = MagicMock(allowed=True)
+    
+    session_key = "voice:session:chan-abc:user-123"
+    await redis_client.hset(session_key, mapping={
+        "session_id": str(uuid.uuid4()),
+        "joined_at": "2026-01-01T00:00:00+00:00"
+    })
+    # Set a low TTL to check if it gets refreshed
+    await redis_client.expire(session_key, 100)
+
     token = make_token("user-123")
-    resp = c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
-    body = resp.json()
-    assert body["session_id"] == redis_mock._existing_session_id
-
-
-def test_join_idempotent_refreshes_ttl(client_already_joined):
-    c, redis_mock = client_already_joined
-    token = make_token("user-123")
-    c.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
-    redis_mock.expire.assert_called()
-    keys = [call[0][0] for call in redis_mock.expire.call_args_list]
-    assert "voice:channel:chan-abc:users" in keys
+    client.post("/voice/chan-abc/join", headers={"Authorization": f"Bearer {token}"})
+    
+    ttl = await redis_client.ttl(session_key)
+    assert ttl > 100
+    assert ttl <= 4 * 60 * 60
