@@ -4,12 +4,12 @@ import nextJest from 'next/jest.js';
 const createJestConfig = nextJest({ dir: './' });
 
 const config: Config = {
-  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],
+  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   testEnvironment: 'jsdom',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
   },
-  testPathPattern: ['<rootDir>/__tests__/'],
+  testMatch: ['**/__tests__/**/*.[jt]s?(x)'],
 };
 
 export default createJestConfig(config);
