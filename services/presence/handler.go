@@ -18,9 +18,9 @@ func newHandler(rdb *redis.Client) *presenceHandler {
 	return &presenceHandler{rdb: rdb}
 }
 
-func sessionKey(connID string) string    { return "session:" + connID }
-func userKey(userID string) string       { return "user:" + userID + ":sessions" }
-func channelKey(chanID string) string    { return "channel:" + chanID + ":sessions" }
+func sessionKey(connID string) string    { return "presence:session:" + connID }
+func userKey(userID string) string       { return "presence:user:" + userID + ":sessions" }
+func channelKey(chanID string) string    { return "presence:channel:" + chanID + ":sessions" }
 
 // POST /sessions
 // Body: {"connection_id":"...","user_id":"...","subscribed_channels":["ch1",...]}
@@ -51,19 +51,24 @@ func (h *presenceHandler) register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	channelsJSON, _ := json.Marshal(body.SubscribedChannels)
-	pipe := h.rdb.Pipeline()
-	pipe.HSet(ctx, key, "subscribed_channels", string(channelsJSON))
-	pipe.Expire(ctx, key, sessionTTL)
-	pipe.SAdd(ctx, userKey(body.UserID), body.ConnectionID)
-	for _, ch := range body.SubscribedChannels {
-		pipe.SAdd(ctx, channelKey(ch), body.ConnectionID)
-	}
-	if _, err := pipe.Exec(ctx); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
+        pipe := h.rdb.Pipeline()
+        pipe.HSet(ctx, key,
+                "connection_id", body.ConnectionID,
+                "user_id", body.UserID,
+                "subscribed_channels", string(channelsJSON),
+                "connected_at", time.Now().UTC().Format(time.RFC3339),
+        )
+        pipe.Expire(ctx, key, sessionTTL)
+        pipe.SAdd(ctx, userKey(body.UserID), body.ConnectionID)
+        for _, ch := range body.SubscribedChannels {
+                pipe.SAdd(ctx, channelKey(ch), body.ConnectionID)
+        }
+        if _, err := pipe.Exec(ctx); err != nil {
+                writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+                return
+        }
 
-	writeJSON(w, http.StatusCreated, map[string]string{"status": "registered"})
+        writeJSON(w, http.StatusOK, map[string]string{"status": "registered"})
 }
 
 // DELETE /sessions/{connID}
@@ -86,7 +91,7 @@ func (h *presenceHandler) deregister(w http.ResponseWriter, r *http.Request) {
 		pipe.Exec(ctx) //nolint:errcheck
 	}
 
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // PUT /sessions/{connID}/heartbeat
