@@ -4,16 +4,16 @@ server:
 spring:
   datasource:
     url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/servers_db}
-    username: discord
-    password: discord
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
   flyway:
     enabled: true
     baseline-on-migrate: true
-  
+
   kafka:
-    bootstrap-servers: localhost:9092
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     consumer:
-      group-id: servers-svc-user-registry-v2 
+      group-id: servers-svc-user-registry
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.StringDeserializer

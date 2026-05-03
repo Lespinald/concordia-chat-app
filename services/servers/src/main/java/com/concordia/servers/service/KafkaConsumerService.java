@@ -22,10 +22,9 @@ public class KafkaConsumerService {
         this.objectMapper = objectMapper; 
     }
 
-    @KafkaListener(topics = "user-registered", groupId = "servers-svc-user-registry-v2")
+    @KafkaListener(topics = "user-registered", groupId = "servers-svc-user-registry")
     @Transactional
     public void consumeUserRegisteredEvent(String message) {
-        System.out.println("!!!!! ALERTA: KAFKA ESCUCHÓ ALGO !!!!!");
         try {
             logger.info("Received event from Kafka: {}", message);
             

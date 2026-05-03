@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\danie\\\\OneDrive\\\\Documentos\\\\GitHub\\\\concordia-chat-app\" -Recurse -Filter \"*compose*\" -ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(xargs grep *)"
+    ]
+  }
+}
