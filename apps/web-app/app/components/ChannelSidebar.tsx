@@ -23,6 +23,12 @@ interface CurrentUser {
   username: string;
 }
 
+interface Member {
+  user_id: string;
+  username: string;
+  roles?: string[];
+}
+
 export default function ChannelSidebar() {
   const router = useRouter();
   const pathname = usePathname();
@@ -30,6 +36,7 @@ export default function ChannelSidebar() {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [server, setServer] = useState<Server | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [hasManageRole, setHasManageRole] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,10 +55,11 @@ export default function ChannelSidebar() {
     setLoading(true);
     setError(null);
     try {
-      const [channelsRes, serverRes, userRes] = await Promise.all([
+      const [channelsRes, serverRes, userRes, membersRes] = await Promise.all([
         apiFetch(`/servers/${sid}/channels`),
         apiFetch(`/servers/${sid}`),
         apiFetch('/auth/me'),
+        apiFetch(`/servers/${sid}/members`),
       ]);
 
       if (!channelsRes.ok) throw new Error(`${channelsRes.status}`);
@@ -66,7 +74,13 @@ export default function ChannelSidebar() {
       setServer(serverData);
 
       if (userRes.ok) {
-        setCurrentUser(await userRes.json() as CurrentUser);
+        const userData = await userRes.json() as CurrentUser;
+        setCurrentUser(userData);
+        if (membersRes.ok) {
+          const membersData = await membersRes.json() as Member[];
+          const memberEntry = membersData.find(m => m.user_id === userData.user_id);
+          setHasManageRole((memberEntry?.roles?.length ?? 0) > 0);
+        }
       }
     } catch {
       setError('Failed to load channels');
@@ -81,6 +95,7 @@ export default function ChannelSidebar() {
     } else {
       setChannels([]);
       setServer(null);
+      setHasManageRole(false);
       setLoading(false);
       setError(null);
     }
@@ -130,6 +145,7 @@ export default function ChannelSidebar() {
   }
 
   const isOwner = !!(currentUser && server && currentUser.user_id === server.owner_id);
+  const canManageChannels = isOwner || hasManageRole;
   const textChannels = channels.filter((c) => c.type === 'TEXT');
   const voiceChannels = channels.filter((c) => c.type === 'VOICE');
 
@@ -172,7 +188,7 @@ export default function ChannelSidebar() {
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
                   Text Channels
                 </span>
-                {isOwner && (
+                {canManageChannels && (
                   <button
                     onClick={() => openModal('TEXT')}
                     title="Create Text Channel"
@@ -205,7 +221,7 @@ export default function ChannelSidebar() {
                 <span className="text-[11px] font-semibold uppercase tracking-widest text-zinc-600">
                   Voice Channels
                 </span>
-                {isOwner && (
+                {canManageChannels && (
                   <button
                     onClick={() => openModal('VOICE')}
                     title="Create Voice Channel"
