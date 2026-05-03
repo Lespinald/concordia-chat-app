@@ -1,6 +1,9 @@
 server:
   port: ${PORT:8082}
 
+grpc:
+  port: ${GRPC_PORT:50051}
+
 spring:
   datasource:
     url: ${POSTGRES_URL:jdbc:postgresql://localhost:5432/servers_db}
