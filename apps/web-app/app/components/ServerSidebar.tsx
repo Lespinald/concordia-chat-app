@@ -165,6 +165,21 @@ export default function ServerSidebar() {
             </button>
           </>
         )}
+
+        <div className="mt-auto mb-1">
+          <div className="w-8 h-px bg-[#27272a] my-1.5" />
+          <button
+            title="Tips"
+            onClick={() => router.push('/app/tips')}
+            className={`w-12 h-12 rounded-2xl flex items-center justify-center cursor-pointer text-xl transition-all duration-200 ${
+              pathname === '/app/tips'
+                ? 'bg-yellow-500/20 text-yellow-400'
+                : 'bg-[#27272a] hover:bg-yellow-500/20 text-zinc-400 hover:text-yellow-400'
+            }`}
+          >
+            💸
+          </button>
+        </div>
       </nav>
 
       {modalOpen && (

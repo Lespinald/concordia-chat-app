@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { apiFetch } from '@/app/lib/api';
+import SendTipModal from '@/app/components/SendTipModal';
 
 interface Message {
   message_id: string;
@@ -37,19 +38,24 @@ function displayName(msg: Message): string {
 export default function MessageList({
   channelId,
   currentUserId,
+  extraMessages = [],
 }: {
   channelId: string;
   currentUserId: string | null;
+  extraMessages?: Message[];
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
+  const [tippingUser, setTippingUser] = useState<{ id: string; name: string } | null>(null);
+  const [tipToast, setTipToast] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
   const initialScrolled = useRef(false);
+  const prevExtraLen = useRef(0);
 
   const fetchMessages = useCallback(
     async (before?: string): Promise<MessagesResponse> => {
@@ -87,6 +93,13 @@ export default function MessageList({
     };
   }, [channelId, fetchMessages]);
 
+  // Merge fetched + extra (optimistic/WS) messages, deduplicating by message_id
+  const allMessages = useMemo(() => {
+    const fetchedIds = new Set(messages.map((m) => m.message_id));
+    const extras = extraMessages.filter((m) => !fetchedIds.has(m.message_id));
+    return [...messages, ...extras];
+  }, [messages, extraMessages]);
+
   // Scroll to bottom after initial load
   useEffect(() => {
     if (!loading && !initialScrolled.current && scrollRef.current) {
@@ -94,6 +107,19 @@ export default function MessageList({
       initialScrolled.current = true;
     }
   }, [loading, messages]);
+
+  // Auto-scroll to bottom when new extra messages arrive (WS / optimistic)
+  useEffect(() => {
+    if (extraMessages.length <= prevExtraLen.current) {
+      prevExtraLen.current = extraMessages.length;
+      return;
+    }
+    prevExtraLen.current = extraMessages.length;
+    const el = scrollRef.current;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+    if (nearBottom) el.scrollTop = el.scrollHeight;
+  }, [extraMessages]);
 
   // Infinite scroll — watch sentinel at top of list
   useEffect(() => {
@@ -171,7 +197,7 @@ export default function MessageList({
         </div>
       )}
 
-      {messages.length === 0 ? (
+      {allMessages.length === 0 ? (
         <div className="h-full flex flex-col items-center justify-center text-center pb-8">
           <div className="text-5xl mb-3 text-zinc-700">#</div>
           <p className="text-lg font-bold text-zinc-300">This is the beginning of the channel</p>
@@ -179,8 +205,8 @@ export default function MessageList({
         </div>
       ) : (
         <div className="flex flex-col px-4 py-2">
-          {messages.map((msg, i) => {
-            const prev = messages[i - 1];
+          {allMessages.map((msg, i) => {
+            const prev = allMessages[i - 1];
             const grouped =
               prev &&
               prev.author_id === msg.author_id &&
@@ -214,6 +240,15 @@ export default function MessageList({
                   </p>
                 </div>
 
+                {!isOwn && (
+                  <button
+                    onClick={() => setTippingUser({ id: msg.author_id, name: displayName(msg) })}
+                    title="Send tip"
+                    className="opacity-0 group-hover:opacity-100 shrink-0 p-1 rounded text-zinc-600 hover:text-yellow-400 transition-all cursor-pointer text-sm"
+                  >
+                    💸
+                  </button>
+                )}
                 {isOwn && (
                   <button
                     onClick={() => handleDelete(msg)}
@@ -241,6 +276,25 @@ export default function MessageList({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {tippingUser && (
+        <SendTipModal
+          recipientId={tippingUser.id}
+          recipientName={tippingUser.name}
+          currentUserId={currentUserId ?? undefined}
+          onClose={() => setTippingUser(null)}
+          onSuccess={(msg) => {
+            setTippingUser(null);
+            setTipToast(msg);
+            setTimeout(() => setTipToast(null), 3000);
+          }}
+        />
+      )}
+      {tipToast && (
+        <div className="fixed bottom-6 right-6 px-4 py-2 bg-green-900/80 border border-green-700/50 text-green-400 text-sm rounded-lg shadow-lg z-40">
+          {tipToast}
         </div>
       )}
     </div>
