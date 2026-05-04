@@ -12,5 +12,3 @@ export default async function ChannelPage({ params }: Props) {
 export function generateStaticParams() {
   return [{ id: 'default', cid: 'default' }];
 }
-
-export const dynamicParams = true;

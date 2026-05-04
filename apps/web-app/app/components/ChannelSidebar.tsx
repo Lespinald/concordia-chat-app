@@ -49,8 +49,8 @@ export default function ChannelSidebar() {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const serverId = pathname.match(/^\/app\/servers\/([^/]+)/)?.[1] ?? null;
-  const activeChannelId = pathname.match(/^\/app\/servers\/[^/]+\/channels\/([^/]+)/)?.[1] ?? null;
+  const serverId = pathname.match(/^\/servers\/([^/]+)/)?.[1] ?? null;
+  const activeChannelId = pathname.match(/^\/servers\/[^/]+\/channels\/([^/]+)/)?.[1] ?? null;
 
   const fetchData = useCallback(async (sid: string) => {
     setLoading(true);

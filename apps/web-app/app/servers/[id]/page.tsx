@@ -19,7 +19,5 @@ export default async function ServerPage({ params }: Props) {
 }
 
 export function generateStaticParams() {
-  return [{ id: 'default' }];
+  return [];
 }
-
-export const dynamicParams = true;
