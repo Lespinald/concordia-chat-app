@@ -19,7 +19,19 @@ func getenv(key, fallback string) string {
 
 func main() {
 	redisAddr := getenv("REDIS_ADDR", "localhost:6379")
-	rdb := redis.NewClient(&redis.Options{Addr: redisAddr})
+	var opts *redis.Options
+	var err error
+
+	if len(redisAddr) > 8 && (redisAddr[:8] == "redis://" || redisAddr[:9] == "rediss://") {
+		opts, err = redis.ParseURL(redisAddr)
+		if err != nil {
+			log.Fatalf("presence: invalid Redis URL %s: %v", redisAddr, err)
+		}
+	} else {
+		opts = &redis.Options{Addr: redisAddr}
+	}
+
+	rdb := redis.NewClient(opts)
 	if err := rdb.Ping(context.Background()).Err(); err != nil {
 		log.Fatalf("presence: cannot connect to Redis at %s: %v", redisAddr, err)
 	}

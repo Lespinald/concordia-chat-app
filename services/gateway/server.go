@@ -40,7 +40,11 @@ func configFromEnv() config {
 
 func parseOrigins(raw string) []string {
 	if raw == "" {
-		return []string{"http://localhost:3000"}
+		return []string{
+			"http://localhost:3000",
+			"app://concordia",
+			"http://localhost:8080",
+		}
 	}
 	parts := strings.Split(raw, ",")
 	out := make([]string, 0, len(parts))

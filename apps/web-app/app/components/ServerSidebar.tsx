@@ -63,7 +63,7 @@ export default function ServerSidebar() {
   }, [modalOpen]);
 
   function activeServerId(): string | null {
-    const m = pathname.match(/^\/app\/servers\/([^/]+)/);
+    const m = pathname.match(/^\/servers\/([^/]+)/);
     return m ? m[1] : null;
   }
 
@@ -83,7 +83,7 @@ export default function ServerSidebar() {
       setServers((prev) => [...prev, created]);
       setModalOpen(false);
       setNewName('');
-      router.push(`/app/servers/${created.server_id}`);
+      router.push(`/servers/${created.server_id}`);
     } catch {
       setCreateError('Failed to create server');
     } finally {
@@ -101,10 +101,10 @@ export default function ServerSidebar() {
           <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 rounded-r-sm bg-white h-9" />
           <div
             className="ml-3 w-12 h-12 rounded-2xl bg-indigo-500 flex items-center justify-center cursor-pointer"
-            onClick={() => router.push('/app')}
+            onClick={() => router.push('/')}
           >
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 9l9-7 9 7v11a2 2 0 01-2-2H5a2 2 0 01-2-2z" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               <polyline points="9 22 9 12 15 12 15 22" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </div>
@@ -145,7 +145,7 @@ export default function ServerSidebar() {
                 title={s.name}
                 className={`ml-3 w-12 h-12 flex items-center justify-center cursor-pointer text-white font-bold text-lg transition-all duration-200 ${isActive ? 'rounded-2xl' : 'rounded-[24px] hover:rounded-2xl'}`}
                 style={{ background: serverColor(s.server_id) }}
-                onClick={() => router.push(`/app/servers/${s.server_id}`)}
+                onClick={() => router.push(`/servers/${s.server_id}`)}
               >
                 {serverInitial(s.name)}
               </div>

@@ -37,6 +37,7 @@ export default function ChannelSidebar() {
   const [server, setServer] = useState<Server | null>(null);
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [hasManageRole, setHasManageRole] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,8 +49,8 @@ export default function ChannelSidebar() {
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const serverId = pathname.match(/^\/app\/servers\/([^/]+)/)?.[1] ?? null;
-  const activeChannelId = pathname.match(/^\/app\/servers\/[^/]+\/channels\/([^/]+)/)?.[1] ?? null;
+  const serverId = pathname.match(/^\/servers\/([^/]+)/)?.[1] ?? null;
+  const activeChannelId = pathname.match(/^\/servers\/[^/]+\/channels\/([^/]+)/)?.[1] ?? null;
 
   const fetchData = useCallback(async (sid: string) => {
     setLoading(true);
@@ -100,6 +101,26 @@ export default function ChannelSidebar() {
       setError(null);
     }
   }, [serverId, fetchData]);
+
+  useEffect(() => {
+    // @ts-ignore
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      // @ts-ignore
+      window.electronAPI.getNotificationPreference().then((pref: boolean) => {
+        setNotificationsEnabled(pref);
+      });
+    }
+  }, []);
+
+  const toggleNotifications = () => {
+    const newVal = !notificationsEnabled;
+    setNotificationsEnabled(newVal);
+    // @ts-ignore
+    if (typeof window !== 'undefined' && window.electronAPI) {
+      // @ts-ignore
+      window.electronAPI.setNotificationPreference(newVal);
+    }
+  };
 
   useEffect(() => {
     if (modalOpen) setTimeout(() => inputRef.current?.focus(), 50);
@@ -201,7 +222,7 @@ export default function ChannelSidebar() {
               {textChannels.map((ch) => (
                 <div
                   key={ch.channel_id}
-                  onClick={() => router.push(`/app/servers/${serverId}/channels/${ch.channel_id}`)}
+                  onClick={() => router.push(`/servers/${serverId}/channels/${ch.channel_id}`)}
                   className={`flex items-center gap-1.5 px-2 py-[5px] rounded-md cursor-pointer text-sm transition-colors ${
                     ch.channel_id === activeChannelId
                       ? 'bg-[#27272a] text-zinc-100'
@@ -259,19 +280,37 @@ export default function ChannelSidebar() {
                 {currentUser?.username ?? 'username'}
               </div>
             </div>
-            <form action={logoutAction}>
-              <button
-                type="submit"
-                title="Sign out"
-                className="text-zinc-500 hover:text-red-400 transition-colors cursor-pointer p-1 rounded"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
-                </svg>
-              </button>
-            </form>
+
+            <div className="flex gap-1 shrink-0">
+              {/* @ts-ignore */}
+              {typeof window !== 'undefined' && window.electronAPI && (
+                <button
+                  type="button"
+                  onClick={toggleNotifications}
+                  title={notificationsEnabled ? "Disable Notifications" : "Enable Notifications"}
+                  className={`hover:bg-[#3f4147] transition-colors cursor-pointer p-1 rounded ${notificationsEnabled ? 'text-zinc-400 hover:text-zinc-200' : 'text-red-400'}`}
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                    {!notificationsEnabled && <line x1="2" y1="2" x2="22" y2="22" />}
+                  </svg>
+                </button>
+              )}
+              <form action={logoutAction}>
+                <button
+                  type="submit"
+                  title="Sign out"
+                  className="text-zinc-500 hover:text-red-400 hover:bg-[#3f4147] transition-colors cursor-pointer p-1 rounded"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" y1="12" x2="9" y2="12" />
+                  </svg>
+                </button>
+              </form>
+            </div>
           </div>
         </div>
       </div>

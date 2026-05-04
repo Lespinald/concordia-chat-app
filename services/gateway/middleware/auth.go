@@ -18,12 +18,20 @@ const ClaimsKey contextKey = "claims"
 // On success it injects the parsed claims into the request context.
 func RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		token := ""
 		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") {
+		if strings.HasPrefix(header, "Bearer ") {
+			token = strings.TrimPrefix(header, "Bearer ")
+		} else if qToken := r.URL.Query().Get("token"); qToken != "" {
+			token = qToken
+		}
+
+		if token == "" {
 			writeUnauthorized(w)
 			return
 		}
-		claims, err := authmw.ValidateJWT(strings.TrimPrefix(header, "Bearer "))
+
+		claims, err := authmw.ValidateJWT(token)
 		if err != nil {
 			writeUnauthorized(w)
 			return
