@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
-const GATEWAY = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const GATEWAY = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 const STRIP_REQ_HEADERS = new Set(['host', 'authorization', 'cookie', 'connection', 'keep-alive']);
 const STRIP_RESP_HEADERS = new Set(['transfer-encoding', 'connection', 'keep-alive']);

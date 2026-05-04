@@ -3,7 +3,7 @@
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 
-const GATEWAY = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+const GATEWAY = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 export type AuthState = { error?: string } | undefined;
 
