@@ -101,4 +101,4 @@ async def signaling_endpoint(websocket: WebSocket, channel_id: str):
         manager.disconnect(channel_id, user_id)
         redis = await aioredis.from_url(REDIS_ADDR)
         await redis.zrem(f"voice:channel:{channel_id}:users", user_id)
-        await redis.close()
+        await redis.aclose()

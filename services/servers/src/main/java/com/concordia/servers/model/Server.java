@@ -18,27 +18,26 @@ public class Server {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
-    @JsonProperty("server_id") // Blocker 2: Cambia "id" a "server_id" en el JSON
+    @JsonProperty("server_id") 
     private UUID id;
 
     @Column(nullable = false)
     private String name;
 
     @Column(name = "owner_id", nullable = false)
-    @JsonProperty("owner_id") // Blocker 2: Cambia "ownerId" a "owner_id" en el JSON
+    @JsonProperty("owner_id") 
     private String ownerId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     @JsonProperty("created_at")
-    private OffsetDateTime createdAt; // Blocker 3: ISO 8601 con zona horaria
+    private OffsetDateTime createdAt; 
 
     @Column(nullable = false)
-    @JsonIgnore // Blocker 4: Oculta este campo para que no salga en la respuesta API
+    @JsonIgnore 
     private boolean deleted = false;
 
     @PrePersist
     protected void onCreate() {
-        // Blocker 3: Guarda la fecha exacta en formato UTC
         this.createdAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 

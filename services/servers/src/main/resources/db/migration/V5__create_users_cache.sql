@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS users_cache (
+    user_id VARCHAR(255) PRIMARY KEY,
+    username VARCHAR(255) NOT NULL
+);

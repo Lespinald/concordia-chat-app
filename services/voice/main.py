@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         raise RuntimeError(f"Could not connect to Redis at {REDIS_URL}: {e}")
     yield
-    await app.state.redis.close()
+    await app.state.redis.aclose()
 
 
 app = FastAPI(lifespan=lifespan)
