@@ -1,8 +1,8 @@
 use axum::{
-    extract::{Path, State, Query}, // <-- Agregamos Query
+    extract::{Path, State, Query},
     http::{HeaderMap, StatusCode},
-    routing::get,
-        Json, Router,
+    routing::{get, delete},
+    Json, Router,
 };
 use chrono::Utc;
 use rdkafka::{
@@ -44,7 +44,6 @@ struct MessageRes {
     created_at: String,
 }
 
-
 #[derive(Deserialize)]
 struct PaginationParams {
     limit: Option<usize>,
@@ -68,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
     // --- Configurar Cassandra ---
-    let cassandra_hosts_str = env::var("CASSANDRA_HOSTS").unwrap_or_else(|_| "127.0.0.1:9042".to_string());
+    let cassandra_hosts_str = env::var("CASSANDRA_HOST").unwrap_or_else(|_| "cassandra".to_string());
     let keyspace = env::var("CASSANDRA_KEYSPACE").unwrap_or_else(|_| "discord_chat".to_string());
     let hosts: Vec<&str> = cassandra_hosts_str.split(',').collect();
     tracing::info!("Connecting to Cassandra...");
@@ -83,13 +82,11 @@ async fn main() -> anyhow::Result<()> {
         .set("message.timeout.ms", "5000")
         .create()?;
 
-// --- Configurar Cliente gRPC ---
+    // --- Configurar Cliente gRPC ---
     let grpc_url = env::var("AUTH_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
     tracing::info!("Configuring Auth gRPC Service...");
     
-    // 1. Preparamos el "Endpoint" con la URL
     let endpoint = tonic::transport::Endpoint::from_shared(grpc_url)?;
-    // 2. Creamos el cliente pasándole la conexión perezosa (lazy)
     let auth_client = AuthClient::new(endpoint.connect_lazy());
 
     let shared_state = Arc::new(AppState {
@@ -98,11 +95,12 @@ async fn main() -> anyhow::Result<()> {
         auth_client,
     });
 
-let app = Router::new()
+    // --- CORRECCIÓN DEL ROUTER ---
+    let app = Router::new()
         .route("/health", get(health_check))
-        // Encadenamos el get y el post en la misma ruta
         .route("/channels/:channel_id/messages", get(get_messages).post(create_message))
-        .with_state(shared_state);
+        .route("/channels/:channel_id/messages/:message_id", delete(delete_message))
+        .with_state(shared_state); // Se llama UNA sola vez al final
 
     let port: u16 = env::var("CHAT_PORT").unwrap_or_else(|_| "3000".to_string()).parse().unwrap_or(3000);
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
@@ -118,7 +116,7 @@ async fn health_check() -> (StatusCode, Json<Value>) {
     (StatusCode::OK, Json(json!({"status": "ok"})))
 }
 
-// === LÓGICA PRINCIPAL DEL TICKET T-27 ===
+// === LÓGICA TICKET T-27 ===
 async fn create_message(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
@@ -126,16 +124,13 @@ async fn create_message(
     Json(payload): Json<CreateMessageReq>,
 ) -> Result<(StatusCode, Json<MessageRes>), (StatusCode, Json<Value>)> {
     
-    // 1. Unauthenticated request -> HTTP 401
     let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
     if auth_header.is_none() || !auth_header.unwrap().starts_with("Bearer ") {
         return Err((StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthenticated"}))));
     }
     
-    // Simulación: Extraemos un user_id del token JWT (se implementará el parseo real en el middleware global)
     let author_id = Uuid::new_v4();
 
-    // 2. Call CheckPerm gRPC with action: WRITE -> HTTP 403 if false
     let mut client = state.auth_client.clone();
     let perm_req = tonic::Request::new(CheckPermRequest {
         user_id: author_id.to_string(),
@@ -152,7 +147,6 @@ async fn create_message(
         return Err((StatusCode::FORBIDDEN, Json(json!({"error": "insufficient permissions"}))));
     }
 
-    // 3. Persist in Cassandra with UUID v7
     let message_id = Uuid::now_v7();
     let content = payload.content;
 
@@ -162,7 +156,6 @@ async fn create_message(
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "database error"})))
     })?;
 
-// 4. Publish Kafka event within 1 second
     let created_at = Utc::now().to_rfc3339();
     let event = json!({
         "event": "message-created",
@@ -173,7 +166,6 @@ async fn create_message(
         "created_at": created_at
     });
     
-    // GUARDAMOS LOS TEXTOS EN VARIABLES PARA QUE VIVAN EN LA MEMORIA
     let payload_str = event.to_string();
     let key_str = channel_id.to_string();
     
@@ -181,10 +173,8 @@ async fn create_message(
         .payload(&payload_str)
         .key(&key_str);
 
-    // Ahora Rust está feliz porque payload_str y key_str siguen vivos aquí
     let _ = state.kafka.send(record, Duration::from_secs(1)).await;
 
-    // 5. Return HTTP 201 with message object
     let res = MessageRes {
         message_id,
         channel_id,
@@ -194,9 +184,9 @@ async fn create_message(
     };
 
     Ok((StatusCode::CREATED, Json(res)))
-
 }
-    // === LÓGICA PRINCIPAL DEL TICKET T-28 ===
+
+// === LÓGICA TICKET T-28 (Actualizado para T-29) ===
 async fn get_messages(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
@@ -204,16 +194,13 @@ async fn get_messages(
     headers: HeaderMap,
 ) -> Result<(StatusCode, Json<PaginatedMessagesRes>), (StatusCode, Json<Value>)> {
     
-    // 1. Verificar autenticación (Igual que en T-27)
     let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
     if auth_header.is_none() || !auth_header.unwrap().starts_with("Bearer ") {
         return Err((StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthenticated"}))));
     }
     
-    // Simulación del user_id (se arreglará en el middleware global)
     let user_id = Uuid::new_v4();
 
-    // 2. Llamada gRPC: CheckPerm con acción "READ"
     let mut client = state.auth_client.clone();
     let perm_req = tonic::Request::new(CheckPermRequest {
         user_id: user_id.to_string(),
@@ -230,19 +217,15 @@ async fn get_messages(
         return Err((StatusCode::FORBIDDEN, Json(json!({"error": "insufficient permissions"}))));
     }
 
-    // 3. Preparar la consulta a Cassandra con paginación basada en cursor
     let limit = params.limit.unwrap_or(50);
-    // Pedimos 1 extra para calcular el "has_more"
     let query_limit = (limit + 1) as i32; 
 
-
-
-    // Ejecutamos la consulta dependiendo de si hay cursor o no
+    // CORRECCIÓN: Código de BD fusionado correctamente aquí
     let query_result = if let Some(before_id) = params.before {
-        let q = "SELECT message_id, author_id, content FROM messages WHERE channel_id = ? AND message_id < ? ORDER BY message_id DESC LIMIT ?";
+        let q = "SELECT message_id, author_id, content, deleted_at FROM messages WHERE channel_id = ? AND message_id < ? ORDER BY message_id DESC LIMIT ?";
         state.db.query(q, (channel_id, before_id, query_limit)).await
     } else {
-        let q = "SELECT message_id, author_id, content FROM messages WHERE channel_id = ? ORDER BY message_id DESC LIMIT ?";
+        let q = "SELECT message_id, author_id, content, deleted_at FROM messages WHERE channel_id = ? ORDER BY message_id DESC LIMIT ?";
         state.db.query(q, (channel_id, query_limit)).await
     };
 
@@ -251,26 +234,29 @@ async fn get_messages(
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "database error"})))
     })?.rows.unwrap_or_default();
 
-    // 4. Mapear los resultados
     let mut messages = Vec::new();
     for row in rows {
-        let (msg_id, auth_id, text): (Uuid, Uuid, String) = row.into_typed().map_err(|_| {
+        // Obtenemos deleted_at
+        let (msg_id, auth_id, text, deleted_at): (Uuid, Uuid, String, Option<String>) = row.into_typed().map_err(|_| {
             (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "data mapping error"})))
         })?;
+
+        // Saltamos los mensajes borrados
+        if deleted_at.is_some() {
+            continue;
+        }
 
         messages.push(MessageRes {
             message_id: msg_id,
             channel_id,
             author_id: auth_id,
             content: text,
-            created_at: "".to_string(), // Idealmente extraído del UUID v7 o guardado en BD
+            created_at: "".to_string(), 
         });
     }
 
-    // 5. Lógica de has_more y next_cursor
     let has_more = messages.len() > limit;
     if has_more {
-        // Quitamos el mensaje extra que pedimos
         messages.pop(); 
     }
 
@@ -281,5 +267,66 @@ async fn get_messages(
         next_cursor,
         has_more,
     })))
+}
 
+// === LÓGICA TICKET T-29 (Soft Delete) ===
+async fn delete_message(
+    State(state): State<Arc<AppState>>,
+    Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, (StatusCode, Json<Value>)> {
+    
+    let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
+    if auth_header.is_none() || !auth_header.unwrap().starts_with("Bearer ") {
+        return Err((StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthenticated"}))));
+    }
+
+    let requester_id = headers.get("x-user-id")
+        .and_then(|h| h.to_str().ok())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .unwrap_or_else(Uuid::new_v4);
+
+    let q_fetch = "SELECT author_id, deleted_at FROM messages WHERE channel_id = ? AND message_id = ?";
+    let row = state.db.query(q_fetch, (channel_id, message_id)).await.map_err(|e| {
+        tracing::error!("Database read error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "database error"})))
+    })?.rows.unwrap_or_default().into_iter().next();
+
+    let (author_id, deleted_at) = match row {
+        Some(r) => r.into_typed::<(Uuid, Option<String>)>().map_err(|_| {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "data mapping error"})))
+        })?,
+        None => return Err((StatusCode::NOT_FOUND, Json(json!({"error": "message not found"})))),
+    };
+
+    if deleted_at.is_some() {
+        return Err((StatusCode::NOT_FOUND, Json(json!({"error": "message not found"}))));
+    }
+
+    if requester_id != author_id {
+        let mut client = state.auth_client.clone();
+        let perm_req = tonic::Request::new(CheckPermRequest {
+            user_id: requester_id.to_string(),
+            channel_id: channel_id.to_string(),
+            action: "MANAGE".to_string(),
+        });
+
+        let perm_res = client.check_perm(perm_req).await.map_err(|_| {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "auth service unavailable"})))
+        })?;
+
+        if !perm_res.into_inner().allowed {
+            return Err((StatusCode::FORBIDDEN, Json(json!({"error": "insufficient permissions"}))));
+        }
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let q_update = "UPDATE messages SET deleted_at = ? WHERE channel_id = ? AND message_id = ?";
+    
+    state.db.query(q_update, (now, channel_id, message_id)).await.map_err(|e| {
+        tracing::error!("Database update error: {}", e);
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "database update error"})))
+    })?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
