@@ -1,13 +1,10 @@
 package com.concordia.servers;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest
-class ServersApplicationTests {
+class ServersApplicationTests extends BaseIntegrationTest {
 
-	@Test
-	void contextLoads() {
-	}
-
+    @Test
+    void contextLoads() {
+    }
 }
