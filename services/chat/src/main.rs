@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
         .create()?;
 
 // --- Configurar Cliente gRPC ---
-    let grpc_url = env::var("AUTH_GRPC_URL").unwrap_or_else(|_| "http://127.0.0.1:50051".to_string());
+    let grpc_addr = env::var("GRPC_ADDR").unwrap_or_else(|_| "http://servers:50051".to_string());
     tracing::info!("Configuring Auth gRPC Service...");
     
     // 1. Preparamos el "Endpoint" con la URL
@@ -119,10 +119,8 @@ async fn create_message(
     
     let token = auth_header.unwrap().trim_start_matches("Bearer ");
     
-    let token_data = jsonwebtoken::dangerous_insecure_decode::<serde_json::Value>(token).map_err(|e| {
-        tracing::error!("Error decoding JWT: {}", e);
-        (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid token"})))
-    })?;
+    let claims = authmw::validate_jwt(&token).map_err(|_| StatusCode::UNAUTHORIZED)?;
+
 
     // Buscamos el ID del usuario en el claim "sub" (estándar) o "user_id". 
     // Ajusta la clave si tu Auth Service lo guarda con otro nombre.
@@ -156,10 +154,9 @@ async fn create_message(
     // --- SOLUCIÓN 1: Guardar created_at en Cassandra ---
     let message_id = Uuid::now_v7();
     let content = payload.content;
-    let created_at = Utc::now().to_rfc3339(); // Movido aquí arriba
-
-    // Agregamos created_at a la query y a los valores enlazados
-    let query = "INSERT INTO messages (channel_id, message_id, author_id, content, created_at) VALUES (?, ?, ?, ?, ?)";
+    let created_at: DateTime<Utc> = Utc::now();
+    session.query("INSERT ... (created_at) VALUES (?)", (&created_at,)).await?;
+    
     state.db.query(query, (channel_id, message_id, author_id, &content, &created_at)).await.map_err(|e| {
         tracing::error!("Database insertion error: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "database error"})))
