@@ -8,3 +8,9 @@ export default async function ChannelPage({
   const { id, cid } = await params;
   return <ChannelView serverId={id} channelId={cid} />;
 }
+
+
+
+export function generateStaticParams() {
+  return [{ id: "default", cid: "default" }];
+}

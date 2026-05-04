@@ -6,7 +6,8 @@
   ],
   "scripts": {
     "dev:web": "npm --workspace=apps/web-app run dev",
-    "dev:desktop": "npm --workspace=apps/desktop-app run start",
-    "build:web": "npm --workspace=apps/web-app run build"
+    "dev:desktop": "NEXT_PUBLIC_API_URL=http://localhost:8080 npm run build:web && npm --workspace=apps/desktop-app run start",
+    "build:web": "npm --workspace=apps/web-app run build",
+    "build:desktop": "NEXT_PUBLIC_API_URL=http://localhost:8080 npm run build:web && npm --workspace=apps/desktop-app run dist"
   }
 }

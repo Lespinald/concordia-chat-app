@@ -15,3 +15,8 @@ export default async function ServerPage({
     </div>
   );
 }
+
+
+export function generateStaticParams() {
+  return [{ id: "default" }];
+}
