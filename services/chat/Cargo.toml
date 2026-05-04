@@ -34,3 +34,4 @@ chrono = { version = "0.4", features = ["serde"] }
 # Esto le dice a Rust cómo compilar los archivos .proto de gRPC
 [build-dependencies]
 tonic-build = "0.11"
+jsonwebtoken = "9.3"

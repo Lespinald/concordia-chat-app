@@ -111,16 +111,32 @@ async fn create_message(
     Json(payload): Json<CreateMessageReq>,
 ) -> Result<(StatusCode, Json<MessageRes>), (StatusCode, Json<Value>)> {
     
-    // 1. Unauthenticated request -> HTTP 401
+    // --- SOLUCIÓN 3: Parsear el JWT ---
     let auth_header = headers.get("authorization").and_then(|h| h.to_str().ok());
     if auth_header.is_none() || !auth_header.unwrap().starts_with("Bearer ") {
         return Err((StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthenticated"}))));
     }
     
-    // Simulación: Extraemos un user_id del token JWT (se implementará el parseo real en el middleware global)
-    let author_id = Uuid::new_v4();
+    let token = auth_header.unwrap().trim_start_matches("Bearer ");
+    
+    let token_data = jsonwebtoken::dangerous_insecure_decode::<serde_json::Value>(token).map_err(|e| {
+        tracing::error!("Error decoding JWT: {}", e);
+        (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid token"})))
+    })?;
 
-    // 2. Call CheckPerm gRPC with action: WRITE -> HTTP 403 if false
+    // Buscamos el ID del usuario en el claim "sub" (estándar) o "user_id". 
+    // Ajusta la clave si tu Auth Service lo guarda con otro nombre.
+    let author_id_str = token_data.claims.get("sub")
+        .or_else(|| token_data.claims.get("user_id")) 
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    let author_id = Uuid::parse_str(author_id_str).map_err(|_| {
+        (StatusCode::UNAUTHORIZED, Json(json!({"error": "invalid author_id format in token"})))
+    })?;
+
+
+    // --- 2. CheckPerm gRPC ---
     let mut client = state.auth_client.clone();
     let perm_req = tonic::Request::new(CheckPermRequest {
         user_id: author_id.to_string(),
@@ -137,18 +153,19 @@ async fn create_message(
         return Err((StatusCode::FORBIDDEN, Json(json!({"error": "insufficient permissions"}))));
     }
 
-    // 3. Persist in Cassandra with UUID v7
+    // --- SOLUCIÓN 1: Guardar created_at en Cassandra ---
     let message_id = Uuid::now_v7();
     let content = payload.content;
+    let created_at = Utc::now().to_rfc3339(); // Movido aquí arriba
 
-    let query = "INSERT INTO messages (channel_id, message_id, author_id, content) VALUES (?, ?, ?, ?)";
-    state.db.query(query, (channel_id, message_id, author_id, &content)).await.map_err(|e| {
+    // Agregamos created_at a la query y a los valores enlazados
+    let query = "INSERT INTO messages (channel_id, message_id, author_id, content, created_at) VALUES (?, ?, ?, ?, ?)";
+    state.db.query(query, (channel_id, message_id, author_id, &content, &created_at)).await.map_err(|e| {
         tracing::error!("Database insertion error: {}", e);
         (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"error": "database error"})))
     })?;
 
-// 4. Publish Kafka event within 1 second
-    let created_at = Utc::now().to_rfc3339();
+    // --- SOLUCIÓN 2: Publicar en el Tópico Correcto ---
     let event = json!({
         "event": "message-created",
         "message_id": message_id,
@@ -158,18 +175,17 @@ async fn create_message(
         "created_at": created_at
     });
     
-    // GUARDAMOS LOS TEXTOS EN VARIABLES PARA QUE VIVAN EN LA MEMORIA
     let payload_str = event.to_string();
     let key_str = channel_id.to_string();
     
-    let record = FutureRecord::to("messages.events")
+    // Nombre del tópico corregido
+    let record = FutureRecord::to("message-created")
         .payload(&payload_str)
         .key(&key_str);
 
-    // Ahora Rust está feliz porque payload_str y key_str siguen vivos aquí
     let _ = state.kafka.send(record, Duration::from_secs(1)).await;
 
-    // 5. Return HTTP 201 with message object
+    // --- 5. Retornar HTTP 201 ---
     let res = MessageRes {
         message_id,
         channel_id,
