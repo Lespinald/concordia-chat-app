@@ -222,7 +222,7 @@ export default function ChannelSidebar() {
               {textChannels.map((ch) => (
                 <div
                   key={ch.channel_id}
-                  onClick={() => router.push(`/app/servers/${serverId}/channels/${ch.channel_id}`)}
+                  onClick={() => router.push(`/servers/${serverId}/channels/${ch.channel_id}`)}
                   className={`flex items-center gap-1.5 px-2 py-[5px] rounded-md cursor-pointer text-sm transition-colors ${
                     ch.channel_id === activeChannelId
                       ? 'bg-[#27272a] text-zinc-100'
