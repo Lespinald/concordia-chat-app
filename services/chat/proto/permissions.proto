@@ -1,0 +1,16 @@
+syntax = "proto3";
+package permissions;
+
+service Auth {
+    rpc CheckPerm (CheckPermRequest) returns (CheckPermResponse);
+}
+
+message CheckPermRequest {
+    string user_id = 1;
+    string channel_id = 2;
+    string action = 3;
+}
+
+message CheckPermResponse {
+    bool allowed = 1;
+}
