@@ -1,21 +1,26 @@
-# --- Builder Stage ---
+# ── Builder ───────────────────────────────────────────────────────────────────
 FROM rust:slim AS builder
+
+# cmake + build-essential are required to compile librdkafka from source (cmake-build feature).
+RUN apt-get update && apt-get install -y \
+    cmake \
+    build-essential \
+    libssl-dev \
+    libcurl4-openssl-dev \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY . .
 RUN cargo build --release
 
-# --- Runtime Stage ---
-FROM debian:bookworm-slim
+# ── Runtime ───────────────────────────────────────────────────────────────────
+FROM ubuntu:24.04
 
-RUN apt-get update && apt-get install -y libssl3 ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y libssl3 libcurl4 ca-certificates wget && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/local/bin
 COPY --from=builder /app/target/release/chat-service .
 
-ENV CASSANDRA_HOSTS=172.17.0.1:9042
-ENV CASSANDRA_KEYSPACE=discord_chat
-ENV CHAT_PORT=3000
-
-EXPOSE 3000
+EXPOSE 8083
 CMD ["./chat-service"]

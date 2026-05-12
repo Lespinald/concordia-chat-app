@@ -39,6 +39,13 @@ public class ServerController {
         return ResponseEntity.ok(servers);
     }
 
+    @GetMapping("/public")
+    public ResponseEntity<List<Server>> getPublicServers(
+            @RequestParam(required = false) String q) {
+
+        return ResponseEntity.ok(serverService.searchPublicServers(q));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<Server> getServerById(@PathVariable UUID id) {
         Optional<Server> server = serverService.getServerById(id);

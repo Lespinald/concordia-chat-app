@@ -76,6 +76,13 @@ public class ServerService {
         return serverRepository.findAllById(serverIds);
     }
 
+    public List<Server> searchPublicServers(String query) {
+        if (query == null || query.isBlank()) {
+            return serverRepository.findAll();
+        }
+        return serverRepository.findByNameContainingIgnoreCase(query);
+    }
+
     public Optional<Server> getServerById(UUID id) {
         return serverRepository.findById(id);
     }
