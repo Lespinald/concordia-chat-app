@@ -14,3 +14,6 @@ anyhow = "1.0"
 dotenvy = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v1", "v4"] }
+rdkafka = { version = "0.36", features = ["cmake-build"] }
+chrono = "0.4"

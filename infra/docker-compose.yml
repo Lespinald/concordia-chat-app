@@ -195,7 +195,7 @@ services:
       TLS_CERT: "/certs/cert.pem"
       TLS_KEY: "/certs/key.pem"
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
-      ALLOWED_ORIGINS: "http://localhost:3000,https://localhost:3000,app://-"
+      ALLOWED_ORIGINS: "http://localhost:3000,https://localhost:3000,http://localhost:3001,https://localhost:3001,app://-"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 10s
@@ -263,13 +263,12 @@ services:
     depends_on:
       cassandra:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
     ports:
       - "8083:8083"
     environment:
       CHAT_PORT: "${CHAT_PORT:-8083}"
       CASSANDRA_HOST: cassandra
+      CASSANDRA_HOSTS: "172.21.0.1:9042"
       KAFKA_BROKERS: kafka:9093
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
     healthcheck:
@@ -375,7 +374,7 @@ services:
       - ../apps/web-app:/app
       - web_app_node_modules:/app/node_modules
     environment:
-      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://gateway:8080}"
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://localhost:8080}"
       # Polling watcher needed for hot-reload on Docker Desktop (Mac/Windows).
       WATCHPACK_POLLING: "true"
     healthcheck:
