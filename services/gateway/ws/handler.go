@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -23,9 +24,34 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(_ *http.Request) bool { return true },
 }
 
-// Handler handles WebSocket upgrades at GET /ws.
-// Each accepted connection runs a single read-loop goroutine; all writes
-// happen on that same goroutine so no mutex is needed on the conn.
+// connWriter serializes writes on a single websocket.Conn — Gorilla forbids
+// concurrent calls to WriteMessage, and pushes from /internal/push race with
+// the per-conn read loop's writes.
+type connWriter struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (cw *connWriter) writeJSON(v any) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+	return cw.conn.WriteMessage(websocket.TextMessage, b)
+}
+
+func (cw *connWriter) writeRaw(b []byte) error {
+	cw.mu.Lock()
+	defer cw.mu.Unlock()
+	return cw.conn.WriteMessage(websocket.TextMessage, b)
+}
+
+// Handler handles WebSocket upgrades at GET /ws and fan-out pushes at
+// POST /internal/push. Each accepted WS connection runs a single read-loop
+// goroutine; the connWriter mutex makes WriteMessage safe to call from the
+// push handler concurrently with read-loop writes.
 type Handler struct {
 	presenceURL string
 	chatURL     string
@@ -33,6 +59,10 @@ type Handler struct {
 
 	active atomic.Int32 // tracks live connections; used for leak detection
 	seq    atomic.Uint64
+
+	mu    sync.RWMutex
+	conns map[string]*connWriter
+	subs  map[string]map[string]struct{} // connID -> channel set
 }
 
 // New returns a Handler that registers sessions with presenceURL and
@@ -42,6 +72,8 @@ func New(presenceURL, chatURL string) *Handler {
 		presenceURL: presenceURL,
 		chatURL:     chatURL,
 		client:      &http.Client{Timeout: 5 * time.Second},
+		conns:       make(map[string]*connWriter),
+		subs:        make(map[string]map[string]struct{}),
 	}
 }
 
@@ -84,10 +116,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	connID := fmt.Sprintf("conn-%d", h.seq.Add(1))
 	userID := claims.UserID
+	cw := &connWriter{conn: conn}
+
+	h.mu.Lock()
+	h.conns[connID] = cw
+	h.subs[connID] = make(map[string]struct{})
+	h.mu.Unlock()
+	defer func() {
+		h.mu.Lock()
+		delete(h.conns, connID)
+		delete(h.subs, connID)
+		h.mu.Unlock()
+	}()
 
 	// Register with Presence synchronously before sending the welcome.
 	// Uses a background context so it outlives the HTTP request context.
-	if err := h.registerSession(userID, connID); err != nil {
+	if err := h.registerSession(userID, connID, nil); err != nil {
 		log.Printf("ws: register session %q: %v", connID, err)
 		// Continue — presence being down should not block the connection.
 	}
@@ -99,7 +143,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer hbCancel()
 	go h.runHeartbeats(hbCtx, connID)
 
-	if err := writeJSON(conn, outMsg{Type: "connected"}); err != nil {
+	if err := cw.writeJSON(outMsg{Type: "connected"}); err != nil {
 		return
 	}
 
@@ -111,29 +155,76 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var in inMsg
 		if err := json.Unmarshal(raw, &in); err != nil {
-			_ = writeJSON(conn, outMsg{Type: "error", Error: "invalid json"})
+			_ = cw.writeJSON(outMsg{Type: "error", Error: "invalid json"})
 			continue
 		}
-		h.dispatch(conn, userID, &in)
+		h.dispatch(cw, userID, connID, &in)
 	}
 }
 
 // --- message routing ---
 
-func (h *Handler) dispatch(conn *websocket.Conn, userID string, in *inMsg) {
+func (h *Handler) dispatch(cw *connWriter, userID, connID string, in *inMsg) {
 	switch in.Type {
 	case "message.send":
 		if in.ChannelID == "" {
-			_ = writeJSON(conn, outMsg{Type: "error", Error: "channel_id required"})
+			_ = cw.writeJSON(outMsg{Type: "error", Error: "channel_id required"})
 			return
 		}
-		h.forwardToChat(conn, userID, in)
+		h.forwardToChat(cw, userID, in)
+	case "channel.subscribe":
+		if in.ChannelID == "" {
+			_ = cw.writeJSON(outMsg{Type: "error", Error: "channel_id required"})
+			return
+		}
+		h.updateSubscription(cw, userID, connID, in.ChannelID, true)
+	case "channel.unsubscribe":
+		if in.ChannelID == "" {
+			_ = cw.writeJSON(outMsg{Type: "error", Error: "channel_id required"})
+			return
+		}
+		h.updateSubscription(cw, userID, connID, in.ChannelID, false)
 	default:
-		_ = writeJSON(conn, outMsg{Type: "error", Error: "unknown type: " + in.Type})
+		_ = cw.writeJSON(outMsg{Type: "error", Error: "unknown type: " + in.Type})
 	}
 }
 
-func (h *Handler) forwardToChat(conn *websocket.Conn, userID string, in *inMsg) {
+// updateSubscription mutates the per-conn channel set and re-registers the
+// session with Presence so its channel→sessions index reflects the new state.
+// Presence's POST /sessions is idempotent for a given connection_id — it
+// cleans the prior channel index entries before writing the new ones.
+func (h *Handler) updateSubscription(cw *connWriter, userID, connID, channelID string, subscribe bool) {
+	h.mu.Lock()
+	set, ok := h.subs[connID]
+	if !ok {
+		// Connection was torn down concurrently; nothing to do.
+		h.mu.Unlock()
+		return
+	}
+	if subscribe {
+		set[channelID] = struct{}{}
+	} else {
+		delete(set, channelID)
+	}
+	channels := make([]string, 0, len(set))
+	for c := range set {
+		channels = append(channels, c)
+	}
+	h.mu.Unlock()
+
+	if err := h.registerSession(userID, connID, channels); err != nil {
+		log.Printf("ws: re-register session %q: %v", connID, err)
+		_ = cw.writeJSON(outMsg{Type: "error", Error: "subscribe failed"})
+		return
+	}
+	ack := "channel.subscribed"
+	if !subscribe {
+		ack = "channel.unsubscribed"
+	}
+	_ = cw.writeJSON(map[string]string{"type": ack, "channel_id": channelID})
+}
+
+func (h *Handler) forwardToChat(cw *connWriter, userID string, in *inMsg) {
 	endpoint := h.chatURL + "/channels/" + in.ChannelID + "/messages"
 	body := in.Payload
 	if len(body) == 0 {
@@ -142,7 +233,7 @@ func (h *Handler) forwardToChat(conn *websocket.Conn, userID string, in *inMsg) 
 
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		_ = writeJSON(conn, outMsg{Type: "error", Error: "internal error"})
+		_ = cw.writeJSON(outMsg{Type: "error", Error: "internal error"})
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -150,11 +241,11 @@ func (h *Handler) forwardToChat(conn *websocket.Conn, userID string, in *inMsg) 
 
 	resp, err := h.client.Do(req)
 	if err != nil {
-		_ = writeJSON(conn, outMsg{Type: "error", Error: "upstream unavailable"})
+		_ = cw.writeJSON(outMsg{Type: "error", Error: "upstream unavailable"})
 		return
 	}
 	resp.Body.Close()
-	_ = writeJSON(conn, outMsg{Type: "message.ack"})
+	_ = cw.writeJSON(outMsg{Type: "message.ack"})
 }
 
 // --- presence calls ---
@@ -183,10 +274,17 @@ func (h *Handler) runHeartbeats(ctx context.Context, connID string) {
 	}
 }
 
-func (h *Handler) registerSession(userID, connID string) error {
+func (h *Handler) registerSession(userID, connID string, channels []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	body, _ := json.Marshal(map[string]string{"user_id": userID, "connection_id": connID})
+	if channels == nil {
+		channels = []string{}
+	}
+	body, _ := json.Marshal(map[string]any{
+		"user_id":             userID,
+		"connection_id":       connID,
+		"subscribed_channels": channels,
+	})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
 		h.presenceURL+"/sessions", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -211,12 +309,52 @@ func (h *Handler) deregisterSession(connID string) {
 	resp.Body.Close()
 }
 
-// --- helpers ---
+// --- internal push ---
 
-func writeJSON(conn *websocket.Conn, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
+// PushRequest is the body shape accepted by POST /internal/push.
+type PushRequest struct {
+	SessionIDs []string        `json:"session_ids"`
+	Event      json.RawMessage `json:"event"`
+}
+
+// PushResponse reports the fan-out result.
+type PushResponse struct {
+	Delivered int `json:"delivered"`
+	Missing   int `json:"missing"`
+}
+
+// PushHandler implements POST /internal/push. Internal-only path: in production
+// this should be reachable only inside the Docker network or behind a shared
+// secret — the route is not exposed via auth middleware on purpose.
+func (h *Handler) PushHandler(w http.ResponseWriter, r *http.Request) {
+	var req PushRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid json"}`, http.StatusBadRequest)
+		return
 	}
-	return conn.WriteMessage(websocket.TextMessage, b)
+	if len(req.Event) == 0 {
+		http.Error(w, `{"error":"event required"}`, http.StatusBadRequest)
+		return
+	}
+
+	delivered := 0
+	missing := 0
+	for _, id := range req.SessionIDs {
+		h.mu.RLock()
+		cw, ok := h.conns[id]
+		h.mu.RUnlock()
+		if !ok {
+			missing++
+			continue
+		}
+		if err := cw.writeRaw(req.Event); err != nil {
+			log.Printf("ws: push to %q failed: %v", id, err)
+			missing++
+			continue
+		}
+		delivered++
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(PushResponse{Delivered: delivered, Missing: missing})
 }

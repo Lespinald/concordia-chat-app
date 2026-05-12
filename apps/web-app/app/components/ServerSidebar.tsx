@@ -35,11 +35,25 @@ export default function ServerSidebar() {
   const [error, setError] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
+  const [modalTab, setModalTab] = useState<'create' | 'join'>('create');
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [joinId, setJoinId] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  function closeModal() {
+    setModalOpen(false);
+    setNewName('');
+    setJoinId('');
+    setCreateError(null);
+    setJoinError(null);
+  }
 
   const fetchServers = useCallback(async () => {
     setLoading(true);
@@ -60,7 +74,7 @@ export default function ServerSidebar() {
 
   useEffect(() => {
     if (modalOpen) setTimeout(() => inputRef.current?.focus(), 50);
-  }, [modalOpen]);
+  }, [modalOpen, modalTab]);
 
   function activeServerId(): string | null {
     const m = pathname.match(/^\/servers\/([^/]+)/);
@@ -81,13 +95,49 @@ export default function ServerSidebar() {
       if (!res.ok) throw new Error(`${res.status}`);
       const created: Server = await res.json();
       setServers((prev) => [...prev, created]);
-      setModalOpen(false);
-      setNewName('');
+      closeModal();
       router.push(`/servers/${created.server_id}`);
     } catch {
       setCreateError('Failed to create server');
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function handleJoin(e: React.FormEvent) {
+    e.preventDefault();
+    const id = joinId.trim();
+    if (!id) return;
+    if (!UUID_RE.test(id)) {
+      setJoinError('Invalid server ID format');
+      return;
+    }
+    if (servers.some((s) => s.server_id === id)) {
+      closeModal();
+      router.push(`/servers/${id}`);
+      return;
+    }
+    setJoining(true);
+    setJoinError(null);
+    try {
+      const res = await apiFetch(`/servers/${id}/join`, { method: 'POST' });
+      if (!res.ok && res.status !== 409) {
+        if (res.status === 404) throw new Error('not_found');
+        throw new Error(`${res.status}`);
+      }
+      const detailRes = await apiFetch(`/servers/${id}`);
+      if (detailRes.ok) {
+        const joined: Server = await detailRes.json();
+        setServers((prev) => (prev.some((s) => s.server_id === joined.server_id) ? prev : [...prev, joined]));
+      } else {
+        await fetchServers();
+      }
+      closeModal();
+      router.push(`/servers/${id}`);
+    } catch (err) {
+      setJoinError(err instanceof Error && err.message === 'not_found' ? 'Server not found' : 'Failed to join server');
+    } finally {
+      setJoining(false);
     }
   }
 
@@ -185,39 +235,101 @@ export default function ServerSidebar() {
       {modalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-          onClick={(e) => { if (e.target === e.currentTarget) { setModalOpen(false); setNewName(''); setCreateError(null); } }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeModal(); }}
         >
           <div className="bg-[#18181b] border border-[#27272a] rounded-xl w-80 p-6 shadow-2xl">
-            <h2 className="text-lg font-bold text-zinc-100 mb-1">Create a Server</h2>
-            <p className="text-sm text-zinc-500 mb-4">Give your server a name to get started.</p>
-            <form onSubmit={handleCreate} className="flex flex-col gap-3">
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Server name"
-                value={newName}
-                onChange={(e) => setNewName(e.target.value)}
-                maxLength={100}
-                className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors"
-              />
-              {createError && <p className="text-xs text-red-400">{createError}</p>}
-              <div className="flex gap-2 justify-end mt-1">
-                <button
-                  type="button"
-                  onClick={() => { setModalOpen(false); setNewName(''); setCreateError(null); }}
-                  className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={creating || !newName.trim()}
-                  className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors cursor-pointer"
-                >
-                  {creating ? 'Creating…' : 'Create'}
-                </button>
-              </div>
-            </form>
+            <div className="flex border-b border-[#27272a] mb-4 -mx-6 -mt-6 px-6 pt-2">
+              <button
+                type="button"
+                onClick={() => setModalTab('create')}
+                className={`px-3 py-2 text-sm font-medium transition-colors cursor-pointer border-b-2 -mb-px ${
+                  modalTab === 'create'
+                    ? 'text-zinc-100 border-indigo-500'
+                    : 'text-zinc-500 border-transparent hover:text-zinc-300'
+                }`}
+              >
+                Create
+              </button>
+              <button
+                type="button"
+                onClick={() => setModalTab('join')}
+                className={`px-3 py-2 text-sm font-medium transition-colors cursor-pointer border-b-2 -mb-px ${
+                  modalTab === 'join'
+                    ? 'text-zinc-100 border-indigo-500'
+                    : 'text-zinc-500 border-transparent hover:text-zinc-300'
+                }`}
+              >
+                Join
+              </button>
+            </div>
+
+            {modalTab === 'create' ? (
+              <>
+                <h2 className="text-lg font-bold text-zinc-100 mb-1">Create a Server</h2>
+                <p className="text-sm text-zinc-500 mb-4">Give your server a name to get started.</p>
+                <form onSubmit={handleCreate} className="flex flex-col gap-3">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Server name"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    maxLength={100}
+                    className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors"
+                  />
+                  {createError && <p className="text-xs text-red-400">{createError}</p>}
+                  <div className="flex gap-2 justify-end mt-1">
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creating || !newName.trim()}
+                      className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors cursor-pointer"
+                    >
+                      {creating ? 'Creating…' : 'Create'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold text-zinc-100 mb-1">Join a Server</h2>
+                <p className="text-sm text-zinc-500 mb-4">Paste a server ID to join.</p>
+                <form onSubmit={handleJoin} className="flex flex-col gap-3">
+                  <input
+                    ref={inputRef}
+                    type="text"
+                    placeholder="Server ID (UUID)"
+                    value={joinId}
+                    onChange={(e) => setJoinId(e.target.value)}
+                    maxLength={64}
+                    className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors font-mono"
+                  />
+                  {joinError && <p className="text-xs text-red-400">{joinError}</p>}
+                  <div className="flex gap-2 justify-end mt-1">
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={joining || !joinId.trim()}
+                      className="px-4 py-2 text-sm bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors cursor-pointer"
+                    >
+                      {joining ? 'Joining…' : 'Join'}
+                    </button>
+                  </div>
+                </form>
+              </>
+            )}
           </div>
         </div>
       )}

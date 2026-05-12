@@ -29,7 +29,7 @@ class CheckPermGrpcTest extends BaseIntegrationTest {
 
     // owner gets @owner role (READ, WRITE, VOICE_JOIN, MANAGE)
     private static final String OWNER = "grpc-owner";
-    // member gets @everyone role (READ, WRITE) — no MANAGE
+    // member gets @everyone role (READ, WRITE, VOICE_JOIN) — no MANAGE
     private static final String MEMBER = "grpc-member";
     private static final String NON_MEMBER = "grpc-nonmember";
 
@@ -90,7 +90,7 @@ class CheckPermGrpcTest extends BaseIntegrationTest {
 
     @Test
     void checkPerm_memberWithoutPermission_returnsDenied() {
-        // MEMBER has @everyone (READ, WRITE) but not MANAGE
+        // MEMBER has @everyone (READ, WRITE, VOICE_JOIN) but not MANAGE
         CheckPermResponse response = stub.checkPerm(CheckPermRequest.newBuilder()
                 .setUserId(MEMBER)
                 .setServerId(serverId)

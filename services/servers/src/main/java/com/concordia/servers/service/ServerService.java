@@ -46,7 +46,7 @@ public class ServerService {
         everyoneRole.setId(UUID.randomUUID());
         everyoneRole.setServerId(savedServer.getId());
         everyoneRole.setName("@everyone");
-        everyoneRole.setPermissions(Set.of(Permission.READ, Permission.WRITE));
+        everyoneRole.setPermissions(Set.of(Permission.READ, Permission.WRITE, Permission.VOICE_JOIN));
         roleRepository.save(everyoneRole);
 
         // Create @owner role with all permissions

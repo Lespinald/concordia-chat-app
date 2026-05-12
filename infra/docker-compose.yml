@@ -171,11 +171,11 @@ services:
       MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/attachments && echo 'Bucket attachments created.'"
+      - "mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD && mc mb --ignore-existing local/attachments && mc anonymous set download local/attachments && echo 'Bucket attachments created and set to public-read.'"
 
   # ── Application services ──────────────────────────────────────
 
-  gateway:
+gateway:
     build:
       context: ..
       dockerfile: services/gateway/Dockerfile
@@ -185,13 +185,18 @@ services:
       kafka:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "8443:8443"
     environment:
-      GATEWAY_PORT: "${GATEWAY_PORT:-8080}"
+      GATEWAY_PORT: "${GATEWAY_PORT:-8443}"
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
-      ALLOWED_ORIGINS: "http://localhost:3000,app://-"
+      ALLOWED_ORIGINS: "https://localhost:3000,app://-"
+      TLS_ENABLED: "true"
+      TLS_CERT_FILE: "/certs/server.crt"
+      TLS_KEY_FILE: "/certs/server.key"
+    volumes:
+      - ./services/gateway/certs:/certs:ro
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-check-certificate -qO- https://localhost:8443/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -251,7 +256,8 @@ services:
 
   chat:
     build:
-      context: ../services/chat
+      context: ..
+      dockerfile: services/chat/Dockerfile
     container_name: chat
     restart: unless-stopped
     depends_on:
@@ -259,13 +265,29 @@ services:
         condition: service_healthy
       kafka:
         condition: service_healthy
+      servers:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      presence:
+        condition: service_healthy
     ports:
       - "8083:8083"
     environment:
       CHAT_PORT: "${CHAT_PORT:-8083}"
       CASSANDRA_HOST: cassandra
+      CASSANDRA_KEYSPACE: discord_chat
       KAFKA_BROKERS: kafka:9093
+      SERVERS_GRPC_ADDR: "http://servers:50051"
+      SERVERS_HTTP_ADDR: "http://servers:8082"
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
+      MINIO_ENDPOINT_INTERNAL: "http://minio:9000"
+      MINIO_ENDPOINT_PUBLIC: "${MINIO_ENDPOINT_PUBLIC:-http://localhost:9000}"
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-attachments}"
+      PRESENCE_HTTP_ADDR: "http://presence:8086"
+      GATEWAY_INTERNAL_PUSH_URL: "http://gateway:8443/internal/push"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:8083/health || exit 1"]
       interval: 10s
@@ -369,7 +391,7 @@ services:
       - ../apps/web-app:/app
       - web_app_node_modules:/app/node_modules
     environment:
-      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-http://gateway:8080}"
+      NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL:-https://localhost:8443}"
       # Polling watcher needed for hot-reload on Docker Desktop (Mac/Windows).
       WATCHPACK_POLLING: "true"
     healthcheck:

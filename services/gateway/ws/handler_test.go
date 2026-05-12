@@ -1,6 +1,7 @@
 package ws_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -37,7 +38,7 @@ func makeToken(t *testing.T) string {
 
 type presenceLog struct {
 	mu          sync.Mutex
-	registered  []map[string]string
+	registered  []map[string]any
 	deregistered []string
 }
 
@@ -59,7 +60,7 @@ func mockPresence(t *testing.T) (*httptest.Server, *presenceLog) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/sessions":
-			var body map[string]string
+			var body map[string]any
 			json.NewDecoder(r.Body).Decode(&body) //nolint:errcheck
 			pl.mu.Lock()
 			pl.registered = append(pl.registered, body)
@@ -392,6 +393,103 @@ func TestForwardToChatUpstreamDown(t *testing.T) {
 }
 
 // ── Load test: 50 simultaneous connections ───────────────────────────────────
+
+// newGatewayWithPush exposes both /ws (auth-protected) and /internal/push
+// (no auth, internal-only) against the same Handler instance.
+func newGatewayWithPush(t *testing.T, h *ws.Handler) (string, string) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle("/", middleware.RequireAuth(h))
+	mux.HandleFunc("POST /internal/push", h.PushHandler)
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http"), srv.URL
+}
+
+func TestPushDeliversToConnectedSessions(t *testing.T) {
+	p, _ := mockPresence(t)
+	tok := makeToken(t)
+
+	h := ws.New(p.URL, "http://unused")
+	wsBase, httpBase := newGatewayWithPush(t, h)
+
+	conn, _ := dial(t, wsBase, "/", tok)
+	if conn == nil {
+		t.Fatal("expected websocket connection")
+	}
+	defer conn.Close()
+	_ = readMsg(t, conn) // drop welcome
+
+	// Wait for the conn to be registered server-side.
+	waitFor(t, "connection registered", func() bool { return h.ActiveConns() == 1 })
+
+	// Discover the connection_id assigned by the gateway. The implementation
+	// numbers them sequentially from 1, so the first conn is "conn-1".
+	body := map[string]any{
+		"session_ids": []string{"conn-1"},
+		"event":       map[string]any{"type": "new_message", "payload": map[string]any{"content": "hi"}},
+	}
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(httpBase+"/internal/push", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("POST /internal/push: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("push status: %d", resp.StatusCode)
+	}
+	var out ws.PushResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Delivered != 1 || out.Missing != 0 {
+		t.Fatalf("expected delivered=1 missing=0, got %+v", out)
+	}
+
+	got := readMsg(t, conn)
+	if got["type"] != "new_message" {
+		t.Fatalf(`expected pushed event type="new_message", got %v`, got)
+	}
+}
+
+func TestPushReportsMissingForUnknownSessions(t *testing.T) {
+	p, _ := mockPresence(t)
+	h := ws.New(p.URL, "http://unused")
+	_, httpBase := newGatewayWithPush(t, h)
+
+	body := map[string]any{
+		"session_ids": []string{"conn-does-not-exist"},
+		"event":       map[string]any{"type": "new_message"},
+	}
+	raw, _ := json.Marshal(body)
+	resp, err := http.Post(httpBase+"/internal/push", "application/json", bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("POST /internal/push: %v", err)
+	}
+	defer resp.Body.Close()
+	var out ws.PushResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if out.Delivered != 0 || out.Missing != 1 {
+		t.Fatalf("expected delivered=0 missing=1, got %+v", out)
+	}
+}
+
+func TestPushRejectsInvalidJSON(t *testing.T) {
+	p, _ := mockPresence(t)
+	h := ws.New(p.URL, "http://unused")
+	_, httpBase := newGatewayWithPush(t, h)
+
+	resp, err := http.Post(httpBase+"/internal/push", "application/json", strings.NewReader("not-json"))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
 
 func TestLoad50SimultaneousConnections(t *testing.T) {
 	p, _ := mockPresence(t)

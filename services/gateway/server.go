@@ -129,6 +129,12 @@ func buildMux(cfg config) http.Handler {
 	wsH := ws.New(cfg.PresenceURL, cfg.ChatURL)
 	mux.Handle("GET /ws", middleware.RequireAuth(wsH))
 
+	// Internal fan-out endpoint called by Chat Svc to push events to specific
+	// WebSocket sessions. Not auth-protected: relies on docker network isolation
+	// (only Chat reaches it via the internal hostname). In production this
+	// should be served on a separate internal port or guarded by a shared secret.
+	mux.HandleFunc("POST /internal/push", wsH.PushHandler)
+
 	// All other routes require a valid Bearer JWT and are rate-limited.
 	// The catch-all "/" has lower priority than every explicit pattern above.
 	mux.Handle("/", middleware.RequireAuth(rl.Limit(router)))

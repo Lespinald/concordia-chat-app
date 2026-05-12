@@ -45,3 +45,12 @@ infra/.env
 Thumbs.db
 
 # Proto generated files are committed (regenerate via contracts/proto/generate.sh)
+
+# Claude
+.claude/settings.local.json
+
+# TLS - Concordia Dev CA
+services/gateway/certs/*.key
+services/gateway/certs/*.csr
+services/gateway/certs/*.srl
+services/gateway/certs/server.ext

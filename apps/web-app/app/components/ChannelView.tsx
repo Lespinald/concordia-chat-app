@@ -74,7 +74,12 @@ export default function ChannelView({
       const ws = new WebSocket(getWebSocketUrl('/ws'));
       wsRef.current = ws;
 
-      ws.onopen = () => { reconnectAttempts.current = 0; };
+      ws.onopen = () => {
+        reconnectAttempts.current = 0;
+        try {
+          ws.send(JSON.stringify({ type: 'channel.subscribe', channel_id: channelId }));
+        } catch { /* connection closed between open and send — onclose will retry */ }
+      };
 
       ws.onmessage = (ev) => {
         try {

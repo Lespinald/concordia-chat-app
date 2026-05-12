@@ -38,7 +38,7 @@ export async function loginAction(
   if (typeof window !== 'undefined') {
     localStorage.setItem('access_token', access_token);
     localStorage.setItem('refresh_token', refresh_token);
-    window.location.href = '/servers/';
+    window.location.href = '/';
   }
   return undefined;
 }
