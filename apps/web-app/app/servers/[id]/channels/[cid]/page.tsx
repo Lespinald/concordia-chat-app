@@ -10,5 +10,7 @@ export default async function ChannelPage({ params }: Props) {
 }
 
 export function generateStaticParams() {
-  return [{ id: 'default', cid: 'default' }];
+  // Same reasoning as parent: [] in dev so any channel ID is served dynamically;
+  // placeholder in production for next build / Electron static export.
+  return process.env.NODE_ENV === 'production' ? [{ id: 'default', cid: 'default' }] : [];
 }

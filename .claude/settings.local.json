@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker compose *)",
+      "Bash(docker exec cassandra *)",
+      "Bash(docker exec web-app *)",
+      "Bash(docker exec gateway *)",
+      "Bash(curl *)",
+      "Bash(xargs grep -l \"authmw\")",
+      "Bash(xargs grep -l \"JWT\\\\|jwt\\\\|token\")",
+      "Bash(xargs grep -l \"JwtUtil\\\\|JwtService\\\\|JwtProvider\\\\|generateToken\\\\|createToken\")",
+      "Bash(xargs cat)",
+      "Bash(docker exec postgres *)",
+      "Bash(docker build *)",
+      "Bash(docker port web-app *)",
+      "Bash(docker port *)"
+    ]
+  }
+}

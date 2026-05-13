@@ -40,6 +40,7 @@ export default function VoiceChannelView({
       container.appendChild(el);
     }
     el.srcObject = stream;
+    el.play().catch(() => {}); // explicit play() for strict autoplay policies (e.g. Brave)
   }
 
   function removePeer(userId: string) {
@@ -95,7 +96,9 @@ export default function VoiceChannelView({
     if (!from) return;
 
     if (type === 'offer') {
-      const pc = peersRef.current.get(from) ?? makePeer(from);
+      // Close any stale pending connection (glare: we may have already sent an offer to this peer).
+      removePeer(from);
+      const pc = makePeer(from);
       await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp as string });
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
@@ -147,14 +150,23 @@ export default function VoiceChannelView({
       }
       localStreamRef.current = stream;
 
+      let existingParticipants: Participant[] = [];
       const partRes = await apiFetch(`/voice/${channelId}/participants`);
       if (partRes.ok) {
         const d = await partRes.json() as { participants: Participant[] };
+        existingParticipants = d.participants;
         setParticipants(d.participants);
       }
 
       const token = localStorage.getItem('access_token');
       if (!token) throw new Error('not authenticated');
+
+      // Decode JWT to get current user's ID so we can exclude self from peer offers
+      let myUserId: string | null = null;
+      try {
+        const b64 = token.split('.')[1];
+        myUserId = (JSON.parse(atob(b64.replace(/-/g, '+').replace(/_/g, '/'))) as { sub: string }).sub;
+      } catch { /* ignore */ }
 
       const ws = new WebSocket(getWebSocketUrl(`/voice/${channelId}/signal`));
       wsRef.current = ws;
@@ -165,6 +177,18 @@ export default function VoiceChannelView({
           doCleanup(false);
           setJoined(false);
           setParticipants([]);
+        }
+      };
+      // On connect, send offers to every other participant already in the channel.
+      // This handles the race where the server broadcast participant_joined before
+      // this client's signaling WS was open, so the inbound offer was dropped.
+      ws.onopen = async () => {
+        for (const p of existingParticipants) {
+          if (p.user_id === myUserId) continue; // never offer to self
+          const pc = makePeer(p.user_id);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          ws.send(JSON.stringify({ type: 'offer', target_user_id: p.user_id, sdp: offer.sdp }));
         }
       };
 
