@@ -44,6 +44,7 @@ export default function ChannelView({
 
   // Fetch channel info and current user
   useEffect(() => {
+    setChannel(null);
     Promise.all([
       apiFetch(`/servers/${serverId}/channels`),
       apiFetch('/auth/me'),

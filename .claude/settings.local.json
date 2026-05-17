@@ -13,7 +13,12 @@
       "Bash(docker exec postgres *)",
       "Bash(docker build *)",
       "Bash(docker port web-app *)",
-      "Bash(docker port *)"
+      "Bash(docker port *)",
+      "Bash(xargs grep -l \"https\\\\|tls\\\\|ssl\\\\|certificate\\\\|TLS\\\\|HTTPS\\\\|SSL\\\\|8443\")",
+      "Bash(xargs grep -l \"TLS\\\\|HTTPS\\\\|certificate\\\\|secure\\\\|Secure\\\\|8443\")",
+      "Bash(xargs grep -l \"8443\\\\|TLS\\\\|HTTPS\\\\|certificate\\\\|secure\")",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\danie\\\\OneDrive\\\\Documentos\\\\GitHub\\\\concordia-chat-app\" -Directory)",
+      "Bash(Select-Object Name)"
     ]
   }
 }
