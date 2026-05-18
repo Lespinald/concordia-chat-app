@@ -40,6 +40,7 @@ func RequireAuth(next http.Handler) http.Handler {
 			f.UserID = claims.UserID
 		}
 		r.Header.Set("X-User-Id", claims.UserID)
+		r.Header.Set("X-Username", claims.Username)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ClaimsKey, claims)))
 	})
 }

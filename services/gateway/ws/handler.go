@@ -24,24 +24,28 @@ var upgrader = websocket.Upgrader{
 }
 
 // Handler handles WebSocket upgrades at GET /ws.
-// Each accepted connection runs a single read-loop goroutine; all writes
-// happen on that same goroutine so no mutex is needed on the conn.
+// Each accepted connection runs a single read-loop goroutine; all writes go
+// through the connection's connWriter so broadcasts from the Kafka consumer
+// goroutine never race with response writes from the read loop.
 type Handler struct {
 	presenceURL string
 	chatURL     string
 	client      *http.Client
+	hub         *Hub
 
 	active atomic.Int32 // tracks live connections; used for leak detection
 	seq    atomic.Uint64
 }
 
-// New returns a Handler that registers sessions with presenceURL and
-// forwards message.send payloads to chatURL.
-func New(presenceURL, chatURL string) *Handler {
+// New returns a Handler that registers sessions with presenceURL,
+// forwards message.send payloads to chatURL, and uses hub to broadcast
+// incoming Kafka events to all connected clients.
+func New(presenceURL, chatURL string, hub *Hub) *Handler {
 	return &Handler{
 		presenceURL: presenceURL,
 		chatURL:     chatURL,
 		client:      &http.Client{Timeout: 5 * time.Second},
+		hub:         hub,
 	}
 }
 
@@ -84,6 +88,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	connID := fmt.Sprintf("conn-%d", h.seq.Add(1))
 	userID := claims.UserID
+	username := claims.Username
+
+	cw := &connWriter{conn: conn}
+	h.hub.add(connID, cw)
+	defer h.hub.remove(connID)
 
 	// Register with Presence synchronously before sending the welcome.
 	// Uses a background context so it outlives the HTTP request context.
@@ -99,7 +108,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer hbCancel()
 	go h.runHeartbeats(hbCtx, connID)
 
-	if err := writeJSON(conn, outMsg{Type: "connected"}); err != nil {
+	if err := cw.sendJSON(outMsg{Type: "connected"}); err != nil {
 		return
 	}
 
@@ -111,29 +120,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		var in inMsg
 		if err := json.Unmarshal(raw, &in); err != nil {
-			_ = writeJSON(conn, outMsg{Type: "error", Error: "invalid json"})
+			_ = cw.sendJSON(outMsg{Type: "error", Error: "invalid json"})
 			continue
 		}
-		h.dispatch(conn, userID, &in)
+		h.dispatch(cw, userID, username, &in)
 	}
 }
 
 // --- message routing ---
 
-func (h *Handler) dispatch(conn *websocket.Conn, userID string, in *inMsg) {
+func (h *Handler) dispatch(cw *connWriter, userID, username string, in *inMsg) {
 	switch in.Type {
 	case "message.send":
 		if in.ChannelID == "" {
-			_ = writeJSON(conn, outMsg{Type: "error", Error: "channel_id required"})
+			_ = cw.sendJSON(outMsg{Type: "error", Error: "channel_id required"})
 			return
 		}
-		h.forwardToChat(conn, userID, in)
+		h.forwardToChat(cw, userID, username, in)
 	default:
-		_ = writeJSON(conn, outMsg{Type: "error", Error: "unknown type: " + in.Type})
+		_ = cw.sendJSON(outMsg{Type: "error", Error: "unknown type: " + in.Type})
 	}
 }
 
-func (h *Handler) forwardToChat(conn *websocket.Conn, userID string, in *inMsg) {
+func (h *Handler) forwardToChat(cw *connWriter, userID, username string, in *inMsg) {
 	endpoint := h.chatURL + "/channels/" + in.ChannelID + "/messages"
 	body := in.Payload
 	if len(body) == 0 {
@@ -142,19 +151,20 @@ func (h *Handler) forwardToChat(conn *websocket.Conn, userID string, in *inMsg) 
 
 	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
-		_ = writeJSON(conn, outMsg{Type: "error", Error: "internal error"})
+		_ = cw.sendJSON(outMsg{Type: "error", Error: "internal error"})
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", userID)
+	req.Header.Set("X-Username", username)
 
 	resp, err := h.client.Do(req)
 	if err != nil {
-		_ = writeJSON(conn, outMsg{Type: "error", Error: "upstream unavailable"})
+		_ = cw.sendJSON(outMsg{Type: "error", Error: "upstream unavailable"})
 		return
 	}
 	resp.Body.Close()
-	_ = writeJSON(conn, outMsg{Type: "message.ack"})
+	_ = cw.sendJSON(outMsg{Type: "message.ack"})
 }
 
 // --- presence calls ---
@@ -209,14 +219,4 @@ func (h *Handler) deregisterSession(connID string) {
 		return
 	}
 	resp.Body.Close()
-}
-
-// --- helpers ---
-
-func writeJSON(conn *websocket.Conn, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return conn.WriteMessage(websocket.TextMessage, b)
 }

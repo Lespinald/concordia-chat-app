@@ -28,11 +28,11 @@ function formatTime(iso: string): string {
 }
 
 function avatarLabel(msg: Message): string {
-  return (msg.username ?? msg.author_id).trim().charAt(0).toUpperCase();
+  return (msg.username?.trim() || msg.author_id).charAt(0).toUpperCase();
 }
 
 function displayName(msg: Message): string {
-  return msg.username ?? msg.author_id.slice(0, 8);
+  return msg.username?.trim() || msg.author_id.slice(0, 8);
 }
 
 export default function MessageList({
@@ -93,11 +93,21 @@ export default function MessageList({
     };
   }, [channelId, fetchMessages]);
 
-  // Merge fetched + extra (optimistic/WS) messages, deduplicating by message_id
+  // Merge fetched + extra (optimistic/WS) messages, deduplicating by message_id.
+  // Fetched messages take priority (canonical server data); extras that share an
+  // ID with a fetched message are dropped. Duplicates within either list are also
+  // collapsed — this guards against the race where a WS broadcast and a REST
+  // re-fetch both land in the same render cycle with the same message_id.
   const allMessages = useMemo(() => {
-    const fetchedIds = new Set(messages.map((m) => m.message_id));
-    const extras = extraMessages.filter((m) => !fetchedIds.has(m.message_id));
-    return [...messages, ...extras];
+    const seen = new Set<string>();
+    const result: Message[] = [];
+    for (const m of [...messages, ...extraMessages]) {
+      if (!seen.has(m.message_id)) {
+        seen.add(m.message_id);
+        result.push(m);
+      }
+    }
+    return result;
   }, [messages, extraMessages]);
 
   // Scroll to bottom after initial load

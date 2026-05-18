@@ -22,6 +22,7 @@ type config struct {
 	TipsURL        string
 	PresenceURL    string
 	RedisAddr      string
+	KafkaBrokers   string
 	AllowedOrigins []string
 }
 
@@ -34,6 +35,7 @@ func configFromEnv() config {
 		TipsURL:        getenv("TIPS_URL", "http://tips:8085"),
 		PresenceURL:    getenv("PRESENCE_URL", "http://presence:8086"),
 		RedisAddr:      getenv("REDIS_ADDR", "redis:6379"),
+		KafkaBrokers:   getenv("KAFKA_BROKERS", "kafka:9093"),
 		AllowedOrigins: parseOrigins(os.Getenv("ALLOWED_ORIGINS")),
 	}
 }
@@ -80,7 +82,7 @@ func isChatPath(path string) bool {
 	return strings.HasPrefix(sub, "messages") || strings.HasPrefix(sub, "attachments")
 }
 
-func buildMux(cfg config) http.Handler {
+func buildMux(cfg config, hub *ws.Hub) http.Handler {
 	authP     := mustProxy(cfg.AuthURL)
 	serversP  := mustProxy(cfg.ServersURL)
 	chatP     := mustProxy(cfg.ChatURL)
@@ -126,7 +128,7 @@ func buildMux(cfg config) http.Handler {
 	mux.Handle("POST /auth/refresh", authP)
 
 	// WebSocket upgrade — protected by JWT.
-	wsH := ws.New(cfg.PresenceURL, cfg.ChatURL)
+	wsH := ws.New(cfg.PresenceURL, cfg.ChatURL, hub)
 	mux.Handle("GET /ws", middleware.RequireAuth(wsH))
 
 	// All other routes require a valid Bearer JWT and are rate-limited.

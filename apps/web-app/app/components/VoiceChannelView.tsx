@@ -28,6 +28,8 @@ export default function VoiceChannelView({
   const localStreamRef = useRef<MediaStream | null>(null);
   const peersRef = useRef(new Map<string, RTCPeerConnection>());
   const audioContainerRef = useRef<HTMLDivElement>(null);
+  // ICE candidates that arrived before setRemoteDescription — flushed after SDP is set.
+  const pendingCandidates = useRef(new Map<string, RTCIceCandidateInit[]>());
 
   function addAudio(userId: string, stream: MediaStream) {
     const container = audioContainerRef.current;
@@ -45,7 +47,16 @@ export default function VoiceChannelView({
   function removePeer(userId: string) {
     peersRef.current.get(userId)?.close();
     peersRef.current.delete(userId);
+    pendingCandidates.current.delete(userId);
     audioContainerRef.current?.querySelector(`audio[data-uid="${userId}"]`)?.remove();
+  }
+
+  async function flushCandidates(userId: string, pc: RTCPeerConnection) {
+    const queued = pendingCandidates.current.get(userId) ?? [];
+    pendingCandidates.current.delete(userId);
+    for (const c of queued) {
+      await pc.addIceCandidate(c).catch(() => {});
+    }
   }
 
   function makePeer(userId: string): RTCPeerConnection {
@@ -97,6 +108,7 @@ export default function VoiceChannelView({
     if (type === 'offer') {
       const pc = peersRef.current.get(from) ?? makePeer(from);
       await pc.setRemoteDescription({ type: 'offer', sdp: data.sdp as string });
+      await flushCandidates(from, pc);
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       wsRef.current?.send(JSON.stringify({ type: 'answer', target_user_id: from, sdp: answer.sdp }));
@@ -104,12 +116,25 @@ export default function VoiceChannelView({
     }
 
     if (type === 'answer') {
-      await peersRef.current.get(from)?.setRemoteDescription({ type: 'answer', sdp: data.sdp as string });
+      const pc = peersRef.current.get(from);
+      if (!pc) return;
+      await pc.setRemoteDescription({ type: 'answer', sdp: data.sdp as string });
+      await flushCandidates(from, pc);
       return;
     }
 
     if (type === 'ice-candidate') {
-      await peersRef.current.get(from)?.addIceCandidate(data.candidate as RTCIceCandidateInit);
+      const pc = peersRef.current.get(from);
+      if (!pc) return;
+      const candidate = data.candidate as RTCIceCandidateInit;
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(candidate).catch(() => {});
+      } else {
+        // Remote description not yet set — queue until setRemoteDescription completes.
+        const q = pendingCandidates.current.get(from) ?? [];
+        q.push(candidate);
+        pendingCandidates.current.set(from, q);
+      }
     }
   }
 
@@ -121,6 +146,7 @@ export default function VoiceChannelView({
     wsRef.current = null;
     peersRef.current.forEach((pc) => pc.close());
     peersRef.current.clear();
+    pendingCandidates.current.clear();
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     if (audioContainerRef.current) audioContainerRef.current.innerHTML = '';

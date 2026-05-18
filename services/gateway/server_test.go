@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"concordia/gateway/ws"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -83,7 +85,7 @@ func TestAuthRoutingProtected(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: up.URL, ServersURL: graveyard(t), ChatURL: graveyard(t),
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	resp := req(t, gw, "POST", "/auth/logout", tok)
@@ -100,7 +102,7 @@ func TestPublicAuthRoutes(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: up.URL, ServersURL: graveyard(t), ChatURL: graveyard(t),
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	for _, path := range []string{"/auth/register", "/auth/login", "/auth/refresh"} {
@@ -118,7 +120,7 @@ func TestServersRouting(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: graveyard(t), ServersURL: up.URL, ChatURL: graveyard(t),
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	paths := []string{
@@ -145,7 +147,7 @@ func TestChatRouting(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: graveyard(t), ServersURL: graveyard(t), ChatURL: up.URL,
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	paths := []string{
@@ -168,7 +170,7 @@ func TestVoiceRouting(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: graveyard(t), ServersURL: graveyard(t), ChatURL: graveyard(t),
 		VoiceURL: up.URL, TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	resp := req(t, gw, "POST", "/voice/sessions", tok)
@@ -186,7 +188,7 @@ func TestTipsRouting(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: graveyard(t), ServersURL: graveyard(t), ChatURL: graveyard(t),
 		VoiceURL: graveyard(t), TipsURL: up.URL, PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	for _, p := range []string{"/tips", "/tips/user-1"} {
@@ -203,7 +205,7 @@ func TestUnknownRoute404(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: graveyard(t), ServersURL: graveyard(t), ChatURL: graveyard(t),
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	resp := req(t, gw, "GET", "/nonexistent/path", tok)
@@ -222,7 +224,7 @@ func TestUpstream5xxPassthrough(t *testing.T) {
 	gw := httptest.NewServer(buildMux(config{
 		AuthURL: graveyard(t), ServersURL: up.URL, ChatURL: graveyard(t),
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	resp := req(t, gw, "GET", "/servers/srv-1", tok)
@@ -240,7 +242,7 @@ func corsGW(t *testing.T, origins []string) *httptest.Server {
 		VoiceURL: graveyard(t), TipsURL: graveyard(t), PresenceURL: graveyard(t),
 		AllowedOrigins: origins,
 	}
-	gw := httptest.NewServer(buildMux(cfg))
+	gw := httptest.NewServer(buildMux(cfg, ws.NewHub()))
 	t.Cleanup(gw.Close)
 	return gw
 }
@@ -370,7 +372,7 @@ func TestIntegrationFullCycle(t *testing.T) {
 		TipsURL:     graveyard(t),
 		PresenceURL: graveyard(t),
 		RedisAddr:   mr.Addr(),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	resp := req(t, gw, "GET", "/servers/srv-1", tok)
@@ -401,7 +403,7 @@ func TestIntegrationRateLimitEndToEnd(t *testing.T) {
 		TipsURL:     graveyard(t),
 		PresenceURL: graveyard(t),
 		RedisAddr:   mr.Addr(),
-	}))
+	}, ws.NewHub()))
 	t.Cleanup(gw.Close)
 
 	resp := req(t, gw, "GET", "/servers", tok)

@@ -139,7 +139,7 @@ func TestWelcomeMessage(t *testing.T) {
 	p, _ := mockPresence(t)
 	tok := makeToken(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection, got handshake failure")
@@ -156,7 +156,7 @@ func TestRejectsNoToken(t *testing.T) {
 	_ = makeToken(t) // ensure JWT_SECRET is set
 	p, _ := mockPresence(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, resp := dial(t, wsBase, "/", "")
 	if conn != nil {
 		conn.Close()
@@ -175,7 +175,7 @@ func TestRejectsInvalidToken(t *testing.T) {
 	_ = makeToken(t) // ensure JWT_SECRET is set
 	p, _ := mockPresence(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, resp := dial(t, wsBase, "/", "definitely.not.valid")
 	if conn != nil {
 		conn.Close()
@@ -190,7 +190,7 @@ func TestSessionRegisteredOnOpen(t *testing.T) {
 	p, pl := mockPresence(t)
 	tok := makeToken(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection")
@@ -219,7 +219,7 @@ func TestSessionDeregisteredOnClose(t *testing.T) {
 	p, pl := mockPresence(t)
 	tok := makeToken(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection")
@@ -260,7 +260,7 @@ func TestMessageForwardedToChat(t *testing.T) {
 	}))
 	t.Cleanup(chat.Close)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, chat.URL))
+	_, wsBase := newGateway(t, ws.New(p.URL, chat.URL, ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection")
@@ -299,7 +299,7 @@ func TestUnknownMessageType(t *testing.T) {
 	p, _ := mockPresence(t)
 	tok := makeToken(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection")
@@ -322,7 +322,7 @@ func TestUnknownMessageType(t *testing.T) {
 // exercise the guard clause that rejects requests with no JWT claims in context.
 func TestServeHTTPNoClaims(t *testing.T) {
 	_ = makeToken(t) // ensure JWT_SECRET is set
-	h := ws.New("http://unused", "http://unused")
+	h := ws.New("http://unused", "http://unused", ws.NewHub())
 
 	rec := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/ws", nil)
@@ -338,7 +338,7 @@ func TestDispatchMissingChannelID(t *testing.T) {
 	p, _ := mockPresence(t)
 	tok := makeToken(t)
 
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://unused", ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection")
@@ -370,7 +370,7 @@ func TestForwardToChatUpstreamDown(t *testing.T) {
 	tok := makeToken(t)
 
 	// Port 19998 has nothing listening — connection will be refused immediately.
-	_, wsBase := newGateway(t, ws.New(p.URL, "http://127.0.0.1:19998"))
+	_, wsBase := newGateway(t, ws.New(p.URL, "http://127.0.0.1:19998", ws.NewHub()))
 	conn, _ := dial(t, wsBase, "/", tok)
 	if conn == nil {
 		t.Fatal("expected WebSocket connection")
@@ -397,7 +397,7 @@ func TestLoad50SimultaneousConnections(t *testing.T) {
 	p, _ := mockPresence(t)
 	tok := makeToken(t)
 
-	h := ws.New(p.URL, "http://unused")
+	h := ws.New(p.URL, "http://unused", ws.NewHub())
 	_, wsBase := newGateway(t, h)
 
 	const n = 50

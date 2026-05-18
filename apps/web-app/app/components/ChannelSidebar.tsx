@@ -63,6 +63,10 @@ export default function ChannelSidebar() {
         apiFetch(`/servers/${sid}/members`),
       ]);
 
+      if (serverRes.status === 404 || channelsRes.status === 404) {
+        router.push('/');
+        return;
+      }
       if (!channelsRes.ok) throw new Error(`${channelsRes.status}`);
       if (!serverRes.ok) throw new Error(`${serverRes.status}`);
 
