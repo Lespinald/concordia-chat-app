@@ -39,8 +39,11 @@ class ConnectionManager:
         """Envía un mensaje JSON a un peer específico en un canal."""
         channel_conns = self.active_connections.get(channel_id, {})
         if target_user_id in channel_conns:
-            await channel_conns[target_user_id].send_json(message)
-            return True
+            try:
+                await channel_conns[target_user_id].send_json(message)
+                return True
+            except Exception:
+                return False
         return False
 
     async def broadcast(self, message: dict, channel_id: str, exclude_user_id: str = None):
@@ -87,17 +90,21 @@ async def signaling_endpoint(websocket: WebSocket, channel_id: str):
             try:
                 message = json.loads(data)
             except json.JSONDecodeError:
-                # Ignorar mensajes malformados y continuar escuchando
                 continue
 
             target_user_id = message.get("target_user_id")
             if target_user_id:
-                message["sender_user_id"] = user_id
+                message["from_user_id"] = user_id
                 success = await manager.send_to_peer(message, channel_id, target_user_id)
                 if not success:
-                    await websocket.send_json({"type": "error", "reason": "peer not connected"})
+                    try:
+                        await websocket.send_json({"type": "error", "reason": "peer not connected"})
+                    except Exception:
+                        pass
 
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(channel_id, user_id)
         redis = await aioredis.from_url(REDIS_ADDR)
         await redis.zrem(f"voice:channel:{channel_id}:users", user_id)

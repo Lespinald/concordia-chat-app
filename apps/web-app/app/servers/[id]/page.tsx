@@ -19,6 +19,8 @@ export default async function ServerPage({ params }: Props) {
 }
 
 export function generateStaticParams() {
-  // Static export requires at least one path; real server IDs are resolved client-side.
-  return [{ id: 'default' }];
+  // Production static export (Electron) needs at least one path; electron-serve falls
+  // back to index.html for real IDs so client-side routing handles them.
+  // In dev, return [] so every server ID is served dynamically without constraints.
+  return process.env.NODE_ENV === 'production' ? [{ id: 'default' }] : [];
 }

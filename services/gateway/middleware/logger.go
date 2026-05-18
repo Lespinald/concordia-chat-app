@@ -1,9 +1,12 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -32,6 +35,14 @@ type statusResponseWriter struct {
 func (rw *statusResponseWriter) WriteHeader(code int) {
 	rw.code = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+func (rw *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := rw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement http.Hijacker")
+	}
+	return h.Hijack()
 }
 
 // Logger writes one JSON log line per request to stdout, skipping GET /health.
