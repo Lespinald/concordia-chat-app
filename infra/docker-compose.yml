@@ -23,6 +23,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 15s
+    networks:
+      - concordia-data
 
   kafka:
     image: bitnamilegacy/kafka:3.8
@@ -74,6 +76,8 @@ services:
         kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists --topic message-created --partitions 1 --replication-factor 1 &&
         kafka-topics.sh --bootstrap-server kafka:9093 --create --if-not-exists --topic mention --partitions 1 --replication-factor 1 &&
         echo 'Topics created: user-registered, message-created, mention'
+    networks:
+      - concordia-data
 
   # ── Databases ─────────────────────────────────────────────────
 
@@ -99,6 +103,8 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    networks:
+      - concordia-data
 
   cassandra:
     image: cassandra:4
@@ -114,6 +120,8 @@ services:
       timeout: 10s
       retries: 20
       start_period: 60s
+    networks:
+      - concordia-data
 
   # One-shot init: creates the discord_chat keyspace once Cassandra is healthy.
   cassandra-init:
@@ -126,6 +134,8 @@ services:
     volumes:
       - ./cassandra/init.cql:/init.cql:ro
     entrypoint: ["cqlsh", "cassandra", "-f", "/init.cql"]
+    networks:
+      - concordia-data
 
   redis:
     image: redis:7-alpine
@@ -163,6 +173,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+    networks:
+      - concordia-data
 
   # One-shot init: creates the attachments bucket once MinIO is healthy.
   minio-init:
@@ -215,6 +227,9 @@ services:
       - ./certs:/certs:ro
     environment:
       GATEWAY_PORT: "${GATEWAY_PORT:-8080}"
+      GATEWAY_TLS_PORT: "${GATEWAY_TLS_PORT:-8443}"
+      TLS_CERT: "/certs/cert.pem"
+      TLS_KEY: "/certs/key.pem"
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
       ALLOWED_ORIGINS: "http://localhost:3000,https://localhost:3000,http://localhost:3001,https://localhost:3001,app://-"
       REDIS_ADDR: "redis:6379"
@@ -253,6 +268,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+    networks:
+      - concordia-services
+      - concordia-data
 
   servers:
     build:
@@ -280,6 +298,9 @@ services:
       timeout: 5s
       retries: 10
       start_period: 60s
+    networks:
+      - concordia-services
+      - concordia-data
 
   chat:
     build:
@@ -289,13 +310,12 @@ services:
     depends_on:
       cassandra:
         condition: service_healthy
-      kafka:
-        condition: service_healthy
     ports:
       - "8083:8083"
     environment:
       CHAT_PORT: "${CHAT_PORT:-8083}"
       CASSANDRA_HOST: cassandra
+      CASSANDRA_HOSTS: "cassandra:9042"
       KAFKA_BROKERS: kafka:9093
       JWT_SECRET: "${JWT_SECRET:-changeme-32-byte-dev-secret!!!}"
       MINIO_URL: "http://minio:9000"
@@ -308,6 +328,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - concordia-services
+      - concordia-data
 
   voice:
     build:
@@ -336,6 +359,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks:
+      - concordia-services
+      - concordia-data
 
   tips:
     build:
@@ -366,6 +392,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks:
+      - concordia-services
+      - concordia-data
 
   presence:
     build:
@@ -387,6 +416,9 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
+    networks:
+      - concordia-services
+      - concordia-data
 
   # ── Web App ───────────────────────────────────────────────────
 
@@ -417,6 +449,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    networks:
+      - concordia-public
 
 volumes:
   postgres_data:

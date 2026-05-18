@@ -123,7 +123,7 @@ async def join_voice_channel(channel_id: str, request: Request):
     # DoD T-46: Notificar a los clientes conectados en el WebRTC que alguien entró
     await signaling.manager.broadcast({
         "type": "participant_joined",
-        "user_id": user_id
+        "from_user_id": user_id
     }, channel_id, exclude_user_id=user_id)
 
     return JoinResponse(
@@ -144,7 +144,7 @@ async def leave_voice_channel(channel_id: str, request: Request):
     # DoD T-46: Notificar a los clientes restantes en el WebRTC que alguien salió
     await signaling.manager.broadcast({
         "type": "participant_left",
-        "user_id": user_id
+        "from_user_id": user_id
     }, channel_id, exclude_user_id=user_id)
 
 

@@ -145,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .with(tracing_subscriber::fmt::layer())
         .init();
-    
+
     dotenvy::dotenv().ok();
 
     let hosts_raw =
@@ -217,8 +217,7 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    
-    tracing::info!("Service started on http://{}", addr);
+    tracing::info!("Chat service listening on http://{}", addr);
     axum::serve(listener, app).await?;
 
     Ok(())

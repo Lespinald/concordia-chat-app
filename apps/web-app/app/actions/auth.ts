@@ -1,4 +1,6 @@
-const GATEWAY = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
+// INTERNAL_API_URL is set in Docker so server actions reach gateway via the
+// Docker network instead of localhost (which is the container itself).
+const GATEWAY = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 export type AuthState = { error?: string } | undefined;
 

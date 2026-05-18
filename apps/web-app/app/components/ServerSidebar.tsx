@@ -39,6 +39,12 @@ export default function ServerSidebar() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
+  const [discoverOpen, setDiscoverOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [publicServers, setPublicServers] = useState<Server[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [joiningId, setJoiningId] = useState<string | null>(null);
+
   const inputRef = useRef<HTMLInputElement>(null);
 
   const fetchServers = useCallback(async () => {
@@ -61,6 +67,36 @@ export default function ServerSidebar() {
   useEffect(() => {
     if (modalOpen) setTimeout(() => inputRef.current?.focus(), 50);
   }, [modalOpen]);
+
+  const searchPublicServers = useCallback(async (q: string) => {
+    setSearchLoading(true);
+    try {
+      const res = await apiFetch(`/servers/public${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+      if (res.ok) setPublicServers(await res.json());
+    } finally {
+      setSearchLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!discoverOpen) return;
+    const timer = setTimeout(() => searchPublicServers(searchQuery), 300);
+    return () => clearTimeout(timer);
+  }, [discoverOpen, searchQuery, searchPublicServers]);
+
+  async function handleJoin(serverId: string) {
+    setJoiningId(serverId);
+    try {
+      const res = await apiFetch(`/servers/${serverId}/join`, { method: 'POST' });
+      if (res.ok) {
+        await fetchServers();
+        setDiscoverOpen(false);
+        router.push(`/servers/${serverId}`);
+      }
+    } finally {
+      setJoiningId(null);
+    }
+  }
 
   function activeServerId(): string | null {
     const m = pathname.match(/^\/servers\/([^/]+)/);
@@ -163,6 +199,15 @@ export default function ServerSidebar() {
             >
               +
             </button>
+            <button
+              title="Discover Servers"
+              onClick={() => { setDiscoverOpen(true); setSearchQuery(''); }}
+              className="ml-0 w-12 h-12 rounded-full hover:rounded-2xl bg-[#27272a] flex items-center justify-center cursor-pointer text-indigo-400 hover:bg-indigo-500 hover:text-white transition-all duration-200"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+            </button>
           </>
         )}
 
@@ -181,6 +226,74 @@ export default function ServerSidebar() {
           </button>
         </div>
       </nav>
+
+      {discoverOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+          onClick={(e) => { if (e.target === e.currentTarget) setDiscoverOpen(false); }}
+        >
+          <div className="bg-[#18181b] border border-[#27272a] rounded-xl w-96 p-6 shadow-2xl flex flex-col gap-4 max-h-[80vh]">
+            <div>
+              <h2 className="text-lg font-bold text-zinc-100 mb-1">Discover Servers</h2>
+              <p className="text-sm text-zinc-500">Find and join servers from the community.</p>
+            </div>
+            <input
+              type="text"
+              placeholder="Search servers…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              autoFocus
+              className="w-full bg-[#09090b] border border-[#27272a] rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+            <div className="flex flex-col gap-2 overflow-y-auto">
+              {searchLoading && (
+                <div className="text-sm text-zinc-500 text-center py-4">Searching…</div>
+              )}
+              {!searchLoading && publicServers.length === 0 && (
+                <div className="text-sm text-zinc-500 text-center py-4">No servers found.</div>
+              )}
+              {!searchLoading && publicServers.map((s) => {
+                const alreadyMember = servers.some((ms) => ms.server_id === s.server_id);
+                return (
+                  <div key={s.server_id} className="flex items-center gap-3 p-3 rounded-lg bg-[#09090b] border border-[#27272a]">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-base shrink-0"
+                      style={{ background: serverColor(s.server_id) }}
+                    >
+                      {serverInitial(s.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-zinc-100 truncate">{s.name}</p>
+                    </div>
+                    {alreadyMember ? (
+                      <button
+                        onClick={() => { setDiscoverOpen(false); router.push(`/servers/${s.server_id}`); }}
+                        className="px-3 py-1.5 text-xs bg-[#27272a] text-zinc-400 rounded-md font-medium cursor-pointer"
+                      >
+                        Joined
+                      </button>
+                    ) : (
+                      <button
+                        disabled={joiningId === s.server_id}
+                        onClick={() => handleJoin(s.server_id)}
+                        className="px-3 py-1.5 text-xs bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 text-white rounded-md font-medium transition-colors cursor-pointer"
+                      >
+                        {joiningId === s.server_id ? 'Joining…' : 'Join'}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              onClick={() => setDiscoverOpen(false)}
+              className="text-sm text-zinc-500 hover:text-zinc-300 text-center cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {modalOpen && (
         <div

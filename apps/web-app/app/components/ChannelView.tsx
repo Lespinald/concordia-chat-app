@@ -116,6 +116,7 @@ export default function ChannelView({
   }, [channelId]);
 
   useEffect(() => {
+    if (channel?.type !== 'TEXT') return;
     alive.current = true;
     connectWs();
     return () => {
@@ -126,7 +127,7 @@ export default function ChannelView({
         wsRef.current.close();
       }
     };
-  }, [connectWs]);
+  }, [connectWs, channel?.type]);
 
   async function handleSend(content: string) {
     if (!currentUser) return;
